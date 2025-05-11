@@ -1,0 +1,113 @@
+name: "Release Branch Notification"
+description: "Sends a notification to Initos when a release branch is created, including commits since last release"
+author: "Augur AI"
+
+inputs:
+  api-url:
+    description: "Initos API URL"
+    required: true
+  api-key:
+    description: "Initos API Key"
+    required: true
+  feed-id:
+    description: "Initos Feed ID"
+    required: true
+  branch-pattern:
+    description: 'Pattern to match release branches (e.g. "release/*")'
+    required: true
+    default: "release/*"
+  previous-tag-pattern:
+    description: 'Pattern to identify previous release tags (e.g. "v*")'
+    required: false
+    default: "v*"
+
+outputs:
+  post-id:
+    description: "ID of the created post"
+    value: ${{ steps.post-to-initos.outputs.post-id }}
+  status-code:
+    description: "HTTP status code from the API response"
+    value: ${{ steps.post-to-initos.outputs.status-code }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+      with:
+        fetch-depth: 0
+
+    - name: Get branch name
+      id: branch-name
+      shell: bash
+      run: |
+        echo "branch=$(echo ${GITHUB_REF#refs/heads/})" >> $GITHUB_OUTPUT
+
+    - name: Find previous release tag
+      id: previous-release
+      shell: bash
+      run: |
+        # Find the most recent tag matching the pattern
+        PREVIOUS_TAG=$(git tag --sort=-creatordate | grep -E "${{ inputs.previous-tag-pattern }}" | head -n 1 || echo "")
+        if [ -z "$PREVIOUS_TAG" ]; then
+          echo "previous_tag=none" >> $GITHUB_OUTPUT
+          echo "No previous release tag found. Will include all commits."
+        else
+          echo "previous_tag=$PREVIOUS_TAG" >> $GITHUB_OUTPUT
+          echo "Found previous release tag: $PREVIOUS_TAG"
+        fi
+
+    - name: Get commits since last release
+      id: commits
+      shell: bash
+      run: |
+        if [ "${{ steps.previous-release.outputs.previous_tag }}" = "none" ]; then
+          # If no previous tag, get all commits in the current branch
+          COMMIT_LIST=$(git log --pretty=format:"- %s (by %an)" ${{ steps.branch-name.outputs.branch }} | head -n 30)
+        else
+          # Get commits between the previous tag and the current branch
+          COMMIT_LIST=$(git log --pretty=format:"- %s (by %an)" ${{ steps.previous-release.outputs.previous_tag }}...${{ steps.branch-name.outputs.branch }} | head -n 30)
+        fi
+
+        # Handle empty commit list
+        if [ -z "$COMMIT_LIST" ]; then
+          COMMIT_LIST="No new commits since last release."
+        fi
+
+        # Save commit list to output with proper escaping for JSON
+        COMMIT_LIST="${COMMIT_LIST//'%'/'%25'}"
+        COMMIT_LIST="${COMMIT_LIST//$'\n'/'%0A'}"
+        COMMIT_LIST="${COMMIT_LIST//$'\r'/'%0D'}"
+        echo "commit_list=$COMMIT_LIST" >> $GITHUB_OUTPUT
+
+    - name: Create notification content
+      id: content
+      shell: bash
+      run: |
+        # Create a summary and full body
+        BRANCH="${{ steps.branch-name.outputs.branch }}"
+        REPO="${GITHUB_REPOSITORY}"
+        SUMMARY="New release branch created: $BRANCH"
+
+        # Create body with commit information
+        BODY="## Release Branch Created: $BRANCH\n\n"
+        BODY+="Repository: $REPO\n\n"
+        BODY+="### Commits since ${{ steps.previous-release.outputs.previous_tag }}:\n\n"
+        BODY+="${{ steps.commits.outputs.commit_list }}"
+
+        # Save to outputs with proper escaping
+        BODY="${BODY//'%'/'%25'}"
+        BODY="${BODY//$'\n'/'%0A'}"
+        BODY="${BODY//$'\r'/'%0D'}"
+        echo "summary=$SUMMARY" >> $GITHUB_OUTPUT
+        echo "body=$BODY" >> $GITHUB_OUTPUT
+
+    - name: Post to Initos
+      id: post-to-initos
+      uses: ./actions/post-feed-update
+      with:
+        api-url: ${{ inputs.api-url }}
+        api-key: ${{ inputs.api-key }}
+        feed-id: ${{ inputs.feed-id }}
+        summary: ${{ steps.content.outputs.summary }}
+        body: ${{ steps.content.outputs.body }}
