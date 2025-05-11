@@ -104,7 +104,7 @@ runs:
 
     - name: Post to Initos
       id: post-to-initos
-      uses: ./actions/post-feed-update
+      uses: augur-ai/augur-actions/actions/post-feed-update@main
       with:
         api-url: ${{ inputs.api-url }}
         api-key: ${{ inputs.api-key }}
