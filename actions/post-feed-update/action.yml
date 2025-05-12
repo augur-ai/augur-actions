@@ -73,11 +73,11 @@ runs:
             "body": $body,
             "topics": $topics,
             "level": $level,
-            "feed_id": $feed_id
+            "feed_ids": [$feed_id]
           }' > payload.json
 
         echo "Sending notification to API..."
-        echo "Using endpoint: ${{ inputs.api_url }}/api/v1/initos/posts/"
+        echo "Using endpoint: ${{ inputs.api_url }}/api/v1/posts/"
 
         # Use wget for API request
         RESPONSE=$(wget --quiet \
@@ -87,7 +87,7 @@ runs:
           --body-file=payload.json \
           --output-document - \
           --server-response \
-          "${{ inputs.api_url }}/api/v1/initos/posts/" 2>&1)
+          "${{ inputs.api_url }}/api/v1/posts/" 2>&1)
 
         # Extract status code
         STATUS_CODE=$(echo "$RESPONSE" | grep "HTTP/" | awk '{print $2}' | tail -1)
