@@ -1,217 +1,107 @@
-name: "Post Feed Update to Initos"
-description: "Posts an update to the Initos API feed system, optionally to multiple feeds"
+name: "Augur Post Feed"
+description: "Posts a notification to Augur API feed"
+author: "augur-ai"
 
 inputs:
-  api-url:
-    description: "Base URL of the Initos API"
+  api_url:
+    description: "Augur API URL"
     required: true
-  api-key:
-    description: "API key for authentication with x-api-key header"
+  api_key:
+    description: "Augur API Key for authentication"
     required: true
-  feed-id:
-    description: "Feed ID to post the update to. Use this for single feed updates."
-    required: false
-  feed-ids:
-    description: "Comma-separated list of feed IDs to post the same update to multiple feeds. Ignored if feeds-config is provided."
-    required: false
-  feeds-config:
-    description: 'JSON string configuring different content for different feeds. Format: [{"feed_id":"id1","body":"content1","summary":"summary1"},{"feed_id":"id2","body":"content2","summary":"summary2"}]'
-    required: false
-  initiative-id:
-    description: "Initiative ID associated with this update (optional)"
-    required: false
+  feed_id:
+    description: "Augur Feed ID to post to"
+    required: true
   body:
-    description: "Content of the post. Required unless feeds-config is provided."
-    required: false
-  summary:
-    description: "Brief summary of the update (will be included in topics). Required unless feeds-config is provided."
-    required: false
+    description: "Content body in Markdown format"
+    required: true
   level:
-    description: "Level of the post (max 20 chars)"
+    description: "Notification level (INFO, WARNING, ERROR)"
     required: false
-    default: "info"
-  status:
-    description: "Status of the post (draft, published, archived)"
-    required: false
-    default: "published"
-  metadata:
-    description: "JSON string of additional metadata to include in topics"
+    default: "INFO"
+  topics:
+    description: "JSON string of topics to include in the notification"
     required: false
     default: "{}"
 
 outputs:
-  post-ids:
-    description: "Comma-separated list of post IDs created in the Initos system"
-    value: ${{ steps.create-posts.outputs.post-ids }}
-  status-codes:
-    description: "Comma-separated list of HTTP status codes from the API requests"
-    value: ${{ steps.create-posts.outputs.status-codes }}
+  post_id:
+    description: "ID of the created post"
+    value: ${{ steps.post.outputs.post_id }}
+  status_code:
+    description: "HTTP status code from the API request"
+    value: ${{ steps.post.outputs.status_code }}
 
 runs:
   using: "composite"
   steps:
-    - name: Create feed posts
-      id: create-posts
+    - name: Validate inputs
+      id: validate
       shell: bash
       run: |
-        # Store post IDs and status codes
-        POST_IDS=""
-        STATUS_CODES=""
-        SUCCESS_COUNT=0
-        FAIL_COUNT=0
-
-        # Function to make a post to a feed
-        post_to_feed() {
-          local feed_id="$1"
-          local body="$2"
-          local summary="$3"
-          local level="${4:-${{ inputs.level }}}"
-          local status="${5:-${{ inputs.status }}}"
-          local metadata="${6:-${{ inputs.metadata }}}"
-          
-          # Prepare the metadata with summary
-          local metadata_with_summary=$(echo "$metadata" | jq -c '. + {"summary": "'"$summary"'"} | if has("initiative_id") then . else . end')
-          
-          # Prepare the request payload
-          local payload=$(cat <<EOF
-          {
-            "feed_id": "$feed_id",
-            "body": "$body",
-            "level": "$level",
-            "status": "$status",
-            "topics": $metadata_with_summary
-          }
-          EOF
-          )
-          
-          # Add initiative_id to topics if provided
-          if [ -n "${{ inputs.initiative-id }}" ]; then
-            payload=$(echo "$payload" | jq -c '.topics += {"initiative_id": "${{ inputs.initiative-id }}"}')
-          fi
-          
-          # Make the API request
-          local response=$(curl -s -w "\n%{http_code}" \
-            -X POST "${{ inputs.api-url }}/api/v1/initos/posts/" \
-            -H "x-api-key: ${{ inputs.api-key }}" \
-            -H "Content-Type: application/json" \
-            -d "$payload")
-          
-          # Extract status code and response body
-          local status_code=$(echo "$response" | tail -n1)
-          local response_body=$(echo "$response" | sed '$d')
-          
-          # Return results
-          if [ "$status_code" -eq 201 ] || [ "$status_code" -eq 200 ]; then
-            local post_id=$(echo "$response_body" | jq -r '.post_id')
-            echo "$post_id|$status_code"
-            echo "✅ Successfully created post in feed $feed_id with ID: $post_id"
-            return 0
-          else
-            echo "|$status_code"
-            echo "❌ Failed to create post in feed $feed_id. Status code: $status_code"
-            echo "Response: $response_body"
-            return 1
-          fi
-        }
-
-        # Check if we're using feeds-config for different content per feed
-        if [ -n "${{ inputs.feeds-config }}" ]; then
-          echo "Using feeds-config to post different content to multiple feeds..."
-          
-          # Loop through the feeds config
-          feed_count=$(echo '${{ inputs.feeds-config }}' | jq '. | length')
-          for (( i=0; i<$feed_count; i++ )); do
-            # Extract feed details
-            feed_config=$(echo '${{ inputs.feeds-config }}' | jq -c ".[$i]")
-            feed_id=$(echo "$feed_config" | jq -r '.feed_id')
-            body=$(echo "$feed_config" | jq -r '.body')
-            summary=$(echo "$feed_config" | jq -r '.summary')
-            level=$(echo "$feed_config" | jq -r '.level // "${{ inputs.level }}"')
-            status=$(echo "$feed_config" | jq -r '.status // "${{ inputs.status }}"')
-            metadata=$(echo "$feed_config" | jq -r '.metadata // "${{ inputs.metadata }}"')
-            
-            # Post to this feed
-            result=$(post_to_feed "$feed_id" "$body" "$summary" "$level" "$status" "$metadata")
-            post_id=$(echo "$result" | cut -d'|' -f1)
-            status_code=$(echo "$result" | cut -d'|' -f2)
-            
-            # Track results
-            if [ -n "$post_id" ]; then
-              POST_IDS="${POST_IDS:+$POST_IDS,}$post_id"
-              SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
-            else
-              POST_IDS="${POST_IDS:+$POST_IDS,}"
-              FAIL_COUNT=$((FAIL_COUNT + 1))
-            fi
-            STATUS_CODES="${STATUS_CODES:+$STATUS_CODES,}$status_code"
-          done
-          
-        # Check if we're using feed-ids for same content to multiple feeds
-        elif [ -n "${{ inputs.feed-ids }}" ]; then
-          echo "Posting same content to multiple feeds..."
-          
-          # Check required parameters
-          if [ -z "${{ inputs.body }}" ] || [ -z "${{ inputs.summary }}" ]; then
-            echo "❌ Error: body and summary are required when using feed-ids"
-            exit 1
-          fi
-          
-          # Loop through feed IDs
-          IFS=',' read -ra FEED_IDS <<< "${{ inputs.feed-ids }}"
-          for feed_id in "${FEED_IDS[@]}"; do
-            # Post to this feed
-            result=$(post_to_feed "$feed_id" "${{ inputs.body }}" "${{ inputs.summary }}")
-            post_id=$(echo "$result" | cut -d'|' -f1)
-            status_code=$(echo "$result" | cut -d'|' -f2)
-            
-            # Track results
-            if [ -n "$post_id" ]; then
-              POST_IDS="${POST_IDS:+$POST_IDS,}$post_id"
-              SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
-            else
-              POST_IDS="${POST_IDS:+$POST_IDS,}"
-              FAIL_COUNT=$((FAIL_COUNT + 1))
-            fi
-            STATUS_CODES="${STATUS_CODES:+$STATUS_CODES,}$status_code"
-          done
-          
-        # Standard single feed case
-        elif [ -n "${{ inputs.feed-id }}" ]; then
-          echo "Posting to a single feed..."
-          
-          # Check required parameters
-          if [ -z "${{ inputs.body }}" ] || [ -z "${{ inputs.summary }}" ]; then
-            echo "❌ Error: body and summary are required when using feed-id"
-            exit 1
-          fi
-          
-          # Post to the single feed
-          result=$(post_to_feed "${{ inputs.feed-id }}" "${{ inputs.body }}" "${{ inputs.summary }}")
-          post_id=$(echo "$result" | cut -d'|' -f1)
-          status_code=$(echo "$result" | cut -d'|' -f2)
-          
-          # Track results
-          POST_IDS="$post_id"
-          STATUS_CODES="$status_code"
-          
-          if [ -n "$post_id" ]; then
-            SUCCESS_COUNT=1
-          else
-            FAIL_COUNT=1
-          fi
-        else
-          echo "❌ Error: One of feed-id, feed-ids, or feeds-config must be provided"
+        if [[ -z "${{ inputs.api_url }}" || -z "${{ inputs.api_key }}" || -z "${{ inputs.feed_id }}" || -z "${{ inputs.body }}" ]]; then
+          echo "❌ Required inputs are missing (api_url, api_key, feed_id, or body)"
           exit 1
         fi
 
-        # Output the results
-        echo "post-ids=$POST_IDS" >> $GITHUB_OUTPUT
-        echo "status-codes=$STATUS_CODES" >> $GITHUB_OUTPUT
+    - name: Post to Initos API
+      id: post
+      shell: bash
+      run: |
+        # Prepare the payload - unescape the body content if needed
+        BODY="${{ inputs.body }}"
 
-        # Summary
-        echo "Summary: $SUCCESS_COUNT successful posts, $FAIL_COUNT failed posts"
+        # Write the content to a temporary file and then read it properly to handle escaping
+        echo -e "${BODY//'%25'/'%'}" > temp_body.txt
+        FORMATTED_BODY=$(cat temp_body.txt)
 
-        # Determine exit status
-        if [ $FAIL_COUNT -gt 0 ]; then
+        # Parse topics from JSON string
+        TOPICS="${{ inputs.topics }}"
+
+        # Create JSON payload using jq with the correct format
+        jq -n \
+          --arg body "$FORMATTED_BODY" \
+          --arg level "${{ inputs.level }}" \
+          --arg feed_id "${{ inputs.feed_id }}" \
+          --argjson topics "$TOPICS" \
+          '{
+            "body": $body,
+            "topics": $topics,
+            "level": $level,
+            "feed_id": $feed_id
+          }' > payload.json
+
+        echo "Sending notification to Initos API..."
+        echo "Using endpoint: ${{ inputs.api_url }}/api/v1/initos/posts/"
+
+        # Use wget for API request
+        RESPONSE=$(wget --quiet \
+          --method POST \
+          --header 'Content-Type: application/json' \
+          --header "x-api-key: ${{ inputs.api_key }}" \
+          --body-file=payload.json \
+          --output-document - \
+          --server-response \
+          "${{ inputs.api_url }}/api/v1/initos/posts/" 2>&1)
+
+        # Extract status code
+        STATUS_CODE=$(echo "$RESPONSE" | grep "HTTP/" | awk '{print $2}' | tail -1)
+        # Extract response body
+        RESPONSE_BODY=$(echo "$RESPONSE" | sed '1,/^$/d')
+
+        echo "API response status code: $STATUS_CODE"
+        echo "API response body: $RESPONSE_BODY"
+
+        # Save status code to output
+        echo "status_code=$STATUS_CODE" >> $GITHUB_OUTPUT
+
+        # Try to extract the post ID from response if successful
+        if [[ "$STATUS_CODE" -ge 200 && "$STATUS_CODE" -lt 300 ]]; then
+          POST_ID=$(echo "$RESPONSE_BODY" | jq -r '.id // "unknown"')
+          echo "post_id=$POST_ID" >> $GITHUB_OUTPUT
+          echo "✅ Notification sent successfully with ID: $POST_ID"
+        else
+          echo "❌ Failed to send notification. Status code: $STATUS_CODE"
+          echo "Response: $RESPONSE_BODY"
           exit 1
         fi
