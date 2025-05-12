@@ -1,23 +1,24 @@
-# Initos Post Feed Action
+# Post Feed Update Action
 
-This GitHub Action posts notifications to the Initos API feed system.
+This GitHub Action posts notifications to API feed systems with support for Markdown formatting.
 
 ## Features
 
-- Sends formatted notifications to Initos API
+- Sends formatted notifications to API
 - Supports markdown content
 - Handles API authentication and error handling
 - Returns post ID for reference
+- Safely validates and processes JSON parameters
 
 ## Usage
 
 ```yaml
-- name: Send notification to Initos
-  uses: augur-ai/augur-actions/actions/initos-post-feed@main
+- name: Send notification to API
+  uses: augur-ai/augur-actions/actions/post-feed-update@main
   with:
-    api_url: ${{ secrets.INITOS_API_URL }}
-    api_key: ${{ secrets.INITOS_API_KEY }}
-    feed_id: ${{ secrets.INITOS_FEED_ID }}
+    api_url: ${{ secrets.API_URL }}
+    api_key: ${{ secrets.API_KEY }}
+    feed_id: ${{ secrets.FEED_ID }}
     body: |
       ## Notification Title
 
@@ -32,17 +33,17 @@ This GitHub Action posts notifications to the Initos API feed system.
 
 This action requires the following secrets to be set in your repository:
 
-- `INITOS_API_URL`: The base URL for the Initos API
-- `INITOS_API_KEY`: Your Initos API key for authentication
-- `INITOS_FEED_ID`: The feed ID to post notifications to
+- `API_URL`: The base URL for the API
+- `API_KEY`: Your API key for authentication
+- `FEED_ID`: The feed ID to post notifications to
 
 ## Inputs
 
 | Input     | Description                                          | Required | Default |
 | --------- | ---------------------------------------------------- | -------- | ------- |
-| `api_url` | Initos API URL                                       | Yes      | N/A     |
-| `api_key` | Initos API Key for authentication                    | Yes      | N/A     |
-| `feed_id` | Initos Feed ID to post to                            | Yes      | N/A     |
+| `api_url` | API URL                                              | Yes      | N/A     |
+| `api_key` | API Key for authentication                           | Yes      | N/A     |
+| `feed_id` | Feed ID to post to                                   | Yes      | N/A     |
 | `body`    | Content body in Markdown format                      | Yes      | N/A     |
 | `level`   | Notification level (INFO, WARNING, ERROR)            | No       | INFO    |
 | `topics`  | JSON string of topics to include in the notification | No       | {}      |
@@ -58,11 +59,11 @@ This action requires the following secrets to be set in your repository:
 
 ```yaml
 - name: Send Release Notification
-  uses: augur-ai/augur-actions/actions/initos-post-feed@main
+  uses: augur-ai/augur-actions/actions/post-feed-update@main
   with:
-    api_url: ${{ secrets.INITOS_API_URL }}
-    api_key: ${{ secrets.INITOS_API_KEY }}
-    feed_id: ${{ secrets.INITOS_RELEASE_FEED_ID }}
+    api_url: ${{ secrets.API_URL }}
+    api_key: ${{ secrets.API_KEY }}
+    feed_id: ${{ secrets.RELEASE_FEED_ID }}
     body: |
       ## 🚀 New Release: v1.0.0
 
@@ -76,6 +77,15 @@ This action requires the following secrets to be set in your repository:
     level: INFO
     topics: '{"release": true, "version": "1.0.0"}'
 ```
+
+## Error Handling
+
+This action includes improved error handling:
+
+- Validates required inputs before execution
+- Checks JSON format of the topics parameter
+- Falls back to empty object `{}` if topics JSON is invalid
+- Provides clear error messages and status codes
 
 ## License
 
