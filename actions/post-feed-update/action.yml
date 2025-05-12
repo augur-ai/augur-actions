@@ -1,16 +1,16 @@
-name: "Augur Post Feed"
-description: "Posts a notification to Augur API feed"
+name: "Post Feed Update"
+description: "Posts a notification to API feed"
 author: "augur-ai"
 
 inputs:
   api_url:
-    description: "Augur API URL"
+    description: "API URL"
     required: true
   api_key:
-    description: "Augur API Key for authentication"
+    description: "API Key for authentication"
     required: true
   feed_id:
-    description: "Augur Feed ID to post to"
+    description: "Feed ID to post to"
     required: true
   body:
     description: "Content body in Markdown format"
@@ -44,7 +44,7 @@ runs:
           exit 1
         fi
 
-    - name: Post to Initos API
+    - name: Post to API
       id: post
       shell: bash
       run: |
@@ -55,8 +55,13 @@ runs:
         echo -e "${BODY//'%25'/'%'}" > temp_body.txt
         FORMATTED_BODY=$(cat temp_body.txt)
 
-        # Parse topics from JSON string
-        TOPICS="${{ inputs.topics }}"
+        # Handle the topics JSON safely - Create a default if invalid
+        TOPICS='${{ inputs.topics }}'
+
+        if ! echo "$TOPICS" | jq empty 2>/dev/null; then
+          echo "Warning: Invalid JSON in topics parameter, using empty object"
+          TOPICS="{}"
+        fi
 
         # Create JSON payload using jq with the correct format
         jq -n \
@@ -71,7 +76,7 @@ runs:
             "feed_id": $feed_id
           }' > payload.json
 
-        echo "Sending notification to Initos API..."
+        echo "Sending notification to API..."
         echo "Using endpoint: ${{ inputs.api_url }}/api/v1/initos/posts/"
 
         # Use wget for API request
