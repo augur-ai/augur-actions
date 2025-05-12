@@ -7,7 +7,7 @@ This GitHub Action collects commit information when a release branch is created 
 - Automatically detects release branches
 - Collects commit information since the last release tag
 - Formats commits in a Markdown table
-- Sends notification to Initos API using the [Initos Post Feed](../initos-post-feed) action
+- Sends notification to Initos API using the [Post Feed Update](../post-feed-update) action
 - Handles error cases gracefully
 
 ## Usage
@@ -93,7 +93,7 @@ The notification includes:
 
 ## Architecture
 
-This action uses the modular [Initos Post Feed](../initos-post-feed) action for the API communication part, making it easy to:
+This action uses the modular [Post Feed Update](../post-feed-update) action for the API communication part, making it easy to:
 
 1. Collect and format commit information
 2. Send notifications with proper formatting
