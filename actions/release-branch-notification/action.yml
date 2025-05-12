@@ -1,33 +1,54 @@
 name: "Release Branch Notification"
-description: "Sends a notification to Initos when a release branch is created, including commits since last release"
-author: "Augur AI"
+description: "Collects commit information from release branches and sends notifications to Initos API"
+author: "augur-ai"
 
 inputs:
-  api-url:
+  branch_name:
+    description: "Branch to analyze for commits"
+    required: false
+    default: ${{ github.ref_name }}
+  previous_tag:
+    description: "Previous tag to compare against for detecting new commits"
+    required: false
+    default: ""
+  api_url:
     description: "Initos API URL"
     required: true
-  api-key:
+  api_key:
     description: "Initos API Key"
     required: true
-  feed-id:
-    description: "Initos Feed ID"
+  feed_id:
+    description: "Initos Release Feed ID"
     required: true
-  branch-pattern:
-    description: 'Pattern to match release branches (e.g. "release/*")'
-    required: true
-    default: "release/*"
-  previous-tag-pattern:
-    description: 'Pattern to identify previous release tags (e.g. "v*")'
+  repo:
+    description: "Repository name (owner/repo)"
     required: false
-    default: "v*"
+    default: ${{ github.repository }}
+  max_commits:
+    description: "Maximum number of commits to include"
+    required: false
+    default: "30"
+  notification_level:
+    description: "Notification level (INFO, WARNING, ERROR)"
+    required: false
+    default: "INFO"
 
 outputs:
-  post-id:
-    description: "ID of the created post"
-    value: ${{ steps.post-to-initos.outputs.post-id }}
-  status-code:
-    description: "HTTP status code from the API response"
-    value: ${{ steps.post-to-initos.outputs.status-code }}
+  branch:
+    description: "The branch that was analyzed"
+    value: ${{ steps.branch-name.outputs.branch }}
+  previous_tag:
+    description: "The previous tag that was used for comparison"
+    value: ${{ steps.previous-release.outputs.previous_tag }}
+  commit_list:
+    description: "Formatted list of commits"
+    value: ${{ steps.commits.outputs.commit_list }}
+  post_id:
+    description: "ID of the notification post created"
+    value: ${{ steps.post-to-initos.outputs.post_id }}
+  status_code:
+    description: "HTTP status code from the API request"
+    value: ${{ steps.post-to-initos.outputs.status_code }}
 
 runs:
   using: "composite"
@@ -36,49 +57,139 @@ runs:
       uses: actions/checkout@v3
       with:
         fetch-depth: 0
+        ref: ${{ inputs.branch_name }}
+
+    - name: Validate inputs
+      id: validate
+      shell: bash
+      run: |
+        if [[ -z "${{ inputs.api_url }}" || -z "${{ inputs.api_key }}" || -z "${{ inputs.feed_id }}" ]]; then
+          echo "❌ Required inputs are missing (api_url, api_key, or feed_id)"
+          exit 1
+        fi
 
     - name: Get branch name
       id: branch-name
       shell: bash
       run: |
-        echo "branch=$(echo ${GITHUB_REF#refs/heads/})" >> $GITHUB_OUTPUT
+        BRANCH_NAME="${{ inputs.branch_name }}"
+        if [[ -z "$BRANCH_NAME" ]]; then
+          BRANCH_NAME=${GITHUB_REF#refs/heads/}
+        fi
+        echo "branch=$BRANCH_NAME" >> $GITHUB_OUTPUT
 
     - name: Find previous release tag
       id: previous-release
       shell: bash
       run: |
-        # Find the most recent tag matching the pattern
-        PREVIOUS_TAG=$(git tag --sort=-creatordate | grep -E "${{ inputs.previous-tag-pattern }}" | head -n 1 || echo "")
-        if [ -z "$PREVIOUS_TAG" ]; then
-          echo "previous_tag=none" >> $GITHUB_OUTPUT
-          echo "No previous release tag found. Will include all commits."
-        else
+        if [[ -n "${{ inputs.previous_tag }}" ]]; then
+          PREVIOUS_TAG="${{ inputs.previous_tag }}"
+          echo "Using user-provided previous tag: $PREVIOUS_TAG"
           echo "previous_tag=$PREVIOUS_TAG" >> $GITHUB_OUTPUT
-          echo "Found previous release tag: $PREVIOUS_TAG"
+        else
+          # Find the most recent tag matching the pattern
+          PREVIOUS_TAG=$(git tag --sort=-creatordate | grep -E "^v" | head -n 1 || echo "")
+          if [ -z "$PREVIOUS_TAG" ]; then
+            echo "No previous release tag found. Will include all commits."
+            echo "previous_tag=none" >> $GITHUB_OUTPUT
+          else
+            echo "Found previous release tag: $PREVIOUS_TAG"
+            echo "previous_tag=$PREVIOUS_TAG" >> $GITHUB_OUTPUT
+          fi
         fi
 
     - name: Get commits since last release
       id: commits
       shell: bash
       run: |
-        if [ "${{ steps.previous-release.outputs.previous_tag }}" = "none" ]; then
-          # If no previous tag, get all commits in the current branch
-          COMMIT_LIST=$(git log --pretty=format:"- %s (by %an)" ${{ steps.branch-name.outputs.branch }} | head -n 30)
+        # Get repository info
+        REPO="${{ inputs.repo }}"
+        echo "Using repository: $REPO"
+
+        # Debug branch info
+        BRANCH="${{ steps.branch-name.outputs.branch }}"
+        echo "Branch to analyze: $BRANCH"
+
+        # Ensure we're on the current branch
+        git fetch --all
+
+        # Check if branch exists
+        if ! git show-ref --verify --quiet refs/remotes/origin/$BRANCH; then
+          echo "Warning: Branch $BRANCH not found in remote. Using current HEAD."
+          BRANCH_REF="HEAD"
         else
-          # Get commits between the previous tag and the current branch
-          COMMIT_LIST=$(git log --pretty=format:"- %s (by %an)" ${{ steps.previous-release.outputs.previous_tag }}...${{ steps.branch-name.outputs.branch }} | head -n 30)
+          echo "Branch $BRANCH found in remote."
+          BRANCH_REF="origin/$BRANCH"
         fi
+
+        echo "Using branch reference: $BRANCH_REF"
+
+        # Handle previous tag
+        PREV_TAG="${{ steps.previous-release.outputs.previous_tag }}"
+        echo "Previous tag: $PREV_TAG"
+
+        # Get commit log with error handling
+        if [ "$PREV_TAG" = "none" ]; then
+          echo "No previous tag found. Getting all commits from $BRANCH_REF"
+          COMMITS=$(git log --pretty=format:"%h|%s|%an|%ai" "$BRANCH_REF" -n ${{ inputs.max_commits }} 2>/dev/null || echo "")
+        else
+          echo "Getting commits between $PREV_TAG and $BRANCH_REF"
+          COMMITS=$(git log --pretty=format:"%h|%s|%an|%ai" "$PREV_TAG"..."$BRANCH_REF" -n ${{ inputs.max_commits }} 2>/dev/null || echo "")
+          
+          # Fallback if the range comparison fails
+          if [ -z "$COMMITS" ]; then
+            echo "Range comparison failed. Getting recent commits from $BRANCH_REF"
+            COMMITS=$(git log --pretty=format:"%h|%s|%an|%ai" "$BRANCH_REF" -n ${{ inputs.max_commits }} 2>/dev/null || echo "")
+          fi
+        fi
+
+        echo "Got $(echo "$COMMITS" | wc -l) commits"
 
         # Handle empty commit list
-        if [ -z "$COMMIT_LIST" ]; then
-          COMMIT_LIST="No new commits since last release."
+        if [ -z "$COMMITS" ]; then
+          echo "No commits found."
+          COMMIT_LIST="No new commits found."
+        else
+          echo "Processing commits..."
+          COMMIT_LIST="| Commit | Description | Author | PR |\n|--------|-------------|--------|----|\n"
+          while IFS= read -r line; do
+            if [ -z "$line" ]; then
+              continue
+            fi
+            
+            # Parse commit details
+            HASH=$(echo "$line" | cut -d'|' -f1)
+            SUBJECT=$(echo "$line" | cut -d'|' -f2)
+            AUTHOR=$(echo "$line" | cut -d'|' -f3)
+            DATE=$(echo "$line" | cut -d'|' -f4 | cut -d' ' -f1)
+            
+            echo "Processing commit: $HASH - $SUBJECT"
+            
+            # Check for PR numbers in commit message
+            PR_NUM=$(echo "$SUBJECT" | grep -oE '#[0-9]+' | head -n 1 | sed 's/#//' || echo "")
+            
+            if [ -n "$PR_NUM" ]; then
+              PR_LINK="[#$PR_NUM](https://github.com/$REPO/pull/$PR_NUM)"
+            else
+              PR_LINK="-"
+            fi
+            
+            # Format commit subject with markdown
+            FORMATTED_SUBJECT=$(echo "$SUBJECT" | sed 's/`/\\`/g')
+            
+            # Create row in markdown table
+            COMMIT_LIST="$COMMIT_LIST| [$HASH](https://github.com/$REPO/commit/$HASH) | $FORMATTED_SUBJECT | $AUTHOR | $PR_LINK |\n"
+          done <<< "$COMMITS"
         fi
 
-        # Save commit list to output with proper escaping for JSON
+        echo "Finished processing commits."
+
+        # Save commit list to output with proper escaping for GitHub Actions
         COMMIT_LIST="${COMMIT_LIST//'%'/'%25'}"
         COMMIT_LIST="${COMMIT_LIST//$'\n'/'%0A'}"
         COMMIT_LIST="${COMMIT_LIST//$'\r'/'%0D'}"
         echo "commit_list=$COMMIT_LIST" >> $GITHUB_OUTPUT
+        echo "Commit data saved to output."
 
     - name: Create notification content
       id: content
@@ -86,14 +197,27 @@ runs:
       run: |
         # Create a summary and full body
         BRANCH="${{ steps.branch-name.outputs.branch }}"
-        REPO="${GITHUB_REPOSITORY}"
+        REPO="${{ inputs.repo }}"
+        echo "Using repository: $REPO"
         SUMMARY="New release branch created: $BRANCH"
 
-        # Create body with commit information
-        BODY="## Release Branch Created: $BRANCH\n\n"
-        BODY+="Repository: $REPO\n\n"
-        BODY+="### Commits since ${{ steps.previous-release.outputs.previous_tag }}:\n\n"
-        BODY+="${{ steps.commits.outputs.commit_list }}"
+        # Format the date using a more compatible approach
+        CURRENT_DATE=$(date +"%Y-%m-%d")
+
+        # Create body with commit information and better formatting
+        BODY="## 🚀 Release Branch Created: $BRANCH\n\n"
+        BODY+="**Repository:** [$REPO](https://github.com/$REPO)\n\n"
+        BODY+="**Date:** $CURRENT_DATE\n\n"
+
+        if [ "${{ steps.previous-release.outputs.previous_tag }}" = "none" ]; then
+          BODY+="### 📋 Latest Commits:\n\n"
+        else 
+          BODY+="### 📋 Commits since ${{ steps.previous-release.outputs.previous_tag }}:\n\n"
+        fi
+
+        BODY+="${{ steps.commits.outputs.commit_list }}\n\n"
+        BODY+="---\n\n"
+        BODY+="*This notification was automatically generated by the Release Branch Notification action.*"
 
         # Save to outputs with proper escaping
         BODY="${BODY//'%'/'%25'}"
@@ -102,12 +226,14 @@ runs:
         echo "summary=$SUMMARY" >> $GITHUB_OUTPUT
         echo "body=$BODY" >> $GITHUB_OUTPUT
 
-    - name: Post to Initos
+    # Use the initos-post-feed action
+    - name: Post to Initos API
       id: post-to-initos
-      uses: augur-ai/augur-actions/actions/post-feed-update@main
+      uses: ../post-feed-update
       with:
-        api-url: ${{ inputs.api-url }}
-        api-key: ${{ inputs.api-key }}
-        feed-id: ${{ inputs.feed-id }}
-        summary: ${{ steps.content.outputs.summary }}
+        api_url: ${{ inputs.api_url }}
+        api_key: ${{ inputs.api_key }}
+        feed_id: ${{ inputs.feed_id }}
         body: ${{ steps.content.outputs.body }}
+        level: ${{ inputs.notification_level }}
+        topics: '{"release_branch": true}'
