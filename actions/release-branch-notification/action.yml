@@ -229,7 +229,7 @@ runs:
     # Use the initos-post-feed action
     - name: Post to Initos API
       id: post-to-initos
-      uses: ../post-feed-update
+      uses: augur-ai/augur-actions/actions/post-feed-update@main
       with:
         api_url: ${{ inputs.api_url }}
         api_key: ${{ inputs.api_key }}
