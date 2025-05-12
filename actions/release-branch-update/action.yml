@@ -145,7 +145,7 @@ runs:
     - name: Post update to feed
       id: post-to-feed
       if: steps.check-author.outputs.skip != 'true'
-      uses: ../post-feed-update
+      uses: augur-ai/augur-actions/actions/post-feed-update@main
       with:
         api_url: ${{ inputs.api_url }}
         api_key: ${{ inputs.api_key }}
