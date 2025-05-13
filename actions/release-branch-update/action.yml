@@ -109,8 +109,11 @@ runs:
         BODY+="**Repository:** [${{ inputs.repo }}](https://github.com/${{ inputs.repo }})\n\n"
         BODY+="**Date:** $DATE\n\n"
         BODY+="### 📋 Merged Commits:\n\n${{ steps.get-commits.outputs.commit_list }}\n---\n"
-        ESCAPED_BODY=$(printf '%s' "$BODY" | sed 's/%/%25/g; s/$/%0A/g')
-        echo "body=$ESCAPED_BODY" >> $GITHUB_OUTPUT
+
+        echo "body<<EOF" >> $GITHUB_OUTPUT
+        echo "$BODY" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+
 
     - name: Post update to feed
       if: steps.pr-info.outputs.skip != 'true'
