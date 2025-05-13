@@ -87,7 +87,7 @@ runs:
                   [[ -z "$HASH" ]] && continue
                   AUTHOR=${AUTHOR_DATE%%//*}
                   DATE=${AUTHOR_DATE##*//}
-                  SAFE_SUBJECT=${SUBJECT//`/\\`}
+                  SAFE_SUBJECT=$(echo "$SUBJECT" | sed 's/`/\\`/g')
                   TABLE+="| [$HASH](https://github.com/$REPO/commit/$HASH) | $SAFE_SUBJECT | $AUTHOR | $DATE |
         "
         done <<< "$COMMITS"
