@@ -93,8 +93,10 @@ runs:
         done <<< "$COMMITS"
 
         # Escape for composite output
-        ESCAPED=$(printf '%s' "$TABLE" | sed 's/%/%25/g; s/$/%0A/g')
-        echo "commit_list=$ESCAPED" >> $GITHUB_OUTPUT
+        echo "commit_list<<EOF" >> $GITHUB_OUTPUT
+        echo "$TABLE" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+
 
     - name: Prepare notification content
       id: content
