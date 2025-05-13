@@ -81,17 +81,17 @@ runs:
 
         # Build markdown table
         TABLE="| Commit | Description | Author | Date |
-    |--------|-------------|--------|------|
-    "
-        while IFS='|' read -r HASH SUBJECT AUTHOR_DATE; do
-          [[ -z "$HASH" ]] && continue
-          AUTHOR=${AUTHOR_DATE%%//*}
-          DATE=${AUTHOR_DATE##*//}
-          SAFE_SUBJECT=$(echo "$SUBJECT" | sed 's/`/\\`/g')
-          SHORT_HASH=${HASH:0:5}
-          TABLE+="| [$SHORT_HASH](https://github.com/$REPO/commit/$HASH) | $SAFE_SUBJECT | $AUTHOR | $DATE |
-    "
-        done <<< "$COMMITS"
+        |--------|-------------|--------|------|
+        "
+            while IFS='|' read -r HASH SUBJECT AUTHOR_DATE; do
+              [[ -z "$HASH" ]] && continue
+              AUTHOR=${AUTHOR_DATE%%//*}
+              DATE=${AUTHOR_DATE##*//}
+              SAFE_SUBJECT=$(echo "$SUBJECT" | sed 's/`/\\`/g')
+              SHORT_HASH=${HASH:0:5}
+              TABLE+="| [$SHORT_HASH](https://github.com/$REPO/commit/$HASH) | $SAFE_SUBJECT | $AUTHOR | $DATE |
+        "
+            done <<< "$COMMITS"
 
         # Escape for composite output
         echo "commit_list<<EOF" >> $GITHUB_OUTPUT
