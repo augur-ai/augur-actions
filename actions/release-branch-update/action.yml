@@ -1,18 +1,10 @@
 name: "Release Branch Update"
-description: "Tracks updates to existing release branches and sends notifications"
+description: "Tracks updates to merged pull requests on release branches and sends notifications"
 author: "augur-ai"
 
 inputs:
-  branch_name:
-    description: "Branch to analyze for updates"
-    required: false
-    default: ${{ github.ref_name }}
-  base_branch:
-    description: "Base branch to compare against"
-    required: false
-    default: "main"
   api_url:
-    description: "API URL for notification service"
+    description: "Notification service API URL"
     required: true
   api_key:
     description: "API Key for authentication"
@@ -34,12 +26,6 @@ inputs:
     default: "INFO"
 
 outputs:
-  branch:
-    description: "The branch that was analyzed"
-    value: ${{ steps.get-commits.outputs.branch }}
-  commit_list:
-    description: "Formatted list of recent commits"
-    value: ${{ steps.get-commits.outputs.commit_list }}
   post_id:
     description: "ID of the notification post created"
     value: ${{ steps.post-to-feed.outputs.post_id }}
@@ -50,115 +36,77 @@ outputs:
 runs:
   using: "composite"
   steps:
-    - name: Check commit author
-      id: check-author
+    - name: Install GitHub CLI
+      run: |
+        sudo apt-get update && sudo apt-get install -y gh
+      shell: bash
+
+    - name: Determine PR number and author
+      id: pr-info
       shell: bash
       run: |
-        if [[ "${{ github.event_name }}" == "push" ]]; then
-          AUTHOR=$(git log -1 --format='%an')
-          echo "Author of last commit: $AUTHOR"
-          if [[ "$AUTHOR" == "GitHub Actions" || "$AUTHOR" == "github-actions" ]]; then
-            echo "skip=true" >> $GITHUB_OUTPUT
-            echo "Skipping notification for GitHub Actions commit"
-          else
-            echo "skip=false" >> $GITHUB_OUTPUT
-            echo "Processing commit by $AUTHOR"
-          fi
+        PR_NUM=$(jq .pull_request.number < "$GITHUB_EVENT_PATH")
+        AUTHOR=$(jq -r .pull_request.user.login < "$GITHUB_EVENT_PATH")
+        echo "pr_number=$PR_NUM" >> $GITHUB_OUTPUT
+        echo "author=$AUTHOR" >> $GITHUB_OUTPUT
+        # Skip if authored by a bot or GitHub Actions
+        if [[ "$AUTHOR" =~ (dependabot\[bot\]|github-actions) ]]; then
+          echo "skip=true" >> $GITHUB_OUTPUT
         else
-          echo "Not a push event, continuing"
           echo "skip=false" >> $GITHUB_OUTPUT
         fi
 
-    - name: Get merged branch commits
+    - name: Fetch PR commits
       id: get-commits
-      if: steps.check-author.outputs.skip != 'true'
+      if: steps.pr-info.outputs.skip != 'true'
       shell: bash
       run: |
-        BRANCH="${{ inputs.branch_name }}"
-        BASE="${{ inputs.base_branch }}"
-        echo "Processing update to branch: $BRANCH"
+        PR_NUM=${{ steps.pr-info.outputs.pr_number }}
+        REPO="${{ inputs.repo }}"
+        echo "Fetching commits for PR #$PR_NUM on $REPO"
 
-        # Find the merge base (common ancestor) between the current branch and base branch
-        MERGE_BASE=$(git merge-base $BASE $BRANCH)
-        echo "Merge base: $MERGE_BASE"
+        # Retrieve commits via GitHub CLI
+        COMMITS=$(gh pr view "$PR_NUM" --repo "$REPO" --json commits \
+                   --jq '.commits[] | "\(.oid)|\(.message|split("\n")[0])|\(.author.login)//\(.committedDate)"')
 
-        # Get only commits that are in the branch but not in the base
-        COMMITS=$(git log --no-merges --pretty=format:"%h|%s|%an|%ai" $MERGE_BASE..$BRANCH)
-
-        # Limit to max_commits if needed
+        # Limit to max_commits
         if [ -n "$COMMITS" ]; then
           COMMITS=$(echo "$COMMITS" | head -n ${{ inputs.max_commits }})
         fi
 
-        # Format the commit message
-        COMMIT_LIST="| Commit | Description | Author | PR |\n|--------|-------------|--------|----|\n"
-        REPO="${{ inputs.repo }}"
-
+        # Build markdown table header
+        TABLE="| Commit | Description | Author | Date |\n|--------|-------------|--------|------|\n"
         while IFS= read -r line; do
-          if [ -z "$line" ]; then
-            continue
-          fi
-          
-          # Parse commit details
-          HASH=$(echo "$line" | cut -d'|' -f1)
-          SUBJECT=$(echo "$line" | cut -d'|' -f2)
-          AUTHOR=$(echo "$line" | cut -d'|' -f3)
-          DATE=$(echo "$line" | cut -d'|' -f4 | cut -d' ' -f1)
-          
-          echo "Processing commit: $HASH - $SUBJECT"
-          
-          # Check for PR numbers
-          PR_NUM=$(echo "$SUBJECT" | grep -oE '#[0-9]+' | head -n 1 | sed 's/#//' || echo "")
-          
-          if [ -n "$PR_NUM" ]; then
-            PR_LINK="[#$PR_NUM](https://github.com/$REPO/pull/$PR_NUM)"
-          else
-            PR_LINK="-"
-          fi
-          
-          # Format commit subject
-          FORMATTED_SUBJECT=$(echo "$SUBJECT" | sed 's/`/\\`/g')
-          
-          # Create row in markdown table
-          COMMIT_LIST="$COMMIT_LIST| [$HASH](https://github.com/$REPO/commit/$HASH) | $FORMATTED_SUBJECT | $AUTHOR | $PR_LINK |\n"
+          [[ -z "$line" ]] && continue
+          IFS="|" read -r HASH SUBJECT AUTHOR_DATE <<< "$line"
+          # AUTHOR_DATE contains "author//date"
+          AUTHOR=${AUTHOR_DATE%%//*}
+          DATE=${AUTHOR_DATE##*//}
+          SAFE_SUBJECT=${SUBJECT//`/\\`}
+          TABLE+="| [$HASH](https://github.com/$REPO/commit/$HASH) | $SAFE_SUBJECT | $AUTHOR | ${DATE%%T*} |\n"
         done <<< "$COMMITS"
 
-        # Save to output with proper escaping
-        COMMIT_LIST="${COMMIT_LIST//'%'/'%25'}"
-        COMMIT_LIST="${COMMIT_LIST//$'\n'/'%0A'}"
-        COMMIT_LIST="${COMMIT_LIST//$'\r'/'%0D'}"
-        echo "commit_list=$COMMIT_LIST" >> $GITHUB_OUTPUT
-
-        # Save branch name
-        echo "branch=$BRANCH" >> $GITHUB_OUTPUT
-        echo "Finished processing commits."
+        # Escape for composite output
+        ESCAPED=$(printf '%s' "$TABLE" | sed 's/%/%25/g; s/$/%0A/g')
+        echo "commit_list=$ESCAPED" >> $GITHUB_OUTPUT
 
     - name: Prepare notification content
       id: content
-      if: steps.check-author.outputs.skip != 'true'
+      if: steps.pr-info.outputs.skip != 'true'
       shell: bash
       run: |
-        # Format the date using a more compatible approach
-        CURRENT_DATE=$(date +"%Y-%m-%d")
-
-        # Create body with commit information
-        BODY="## ⚡ Release Branch Updated: ${{ steps.get-commits.outputs.branch }}\n\n"
+        PR_NUM=${{ steps.pr-info.outputs.pr_number }}
+        DATE=$(date +"%Y-%m-%d")
+        BODY="## ⚡ Release Branch Update: PR #${PR_NUM}\n\n"
         BODY+="**Repository:** [${{ inputs.repo }}](https://github.com/${{ inputs.repo }})\n\n"
-        BODY+="**Date:** $CURRENT_DATE\n\n"
-        BODY+="### 📋 Branch Commits:\n\n"
-        BODY+="${{ steps.get-commits.outputs.commit_list }}\n\n"
-        BODY+="---\n\n"
-        BODY+="*This notification was automatically generated by the Release Branch Update action.*"
-
-        # Save to outputs with proper escaping
-        BODY="${BODY//'%'/'%25'}"
-        BODY="${BODY//$'\n'/'%0A'}"
-        BODY="${BODY//$'\r'/'%0D'}"
-        echo "body=$BODY" >> $GITHUB_OUTPUT
+        BODY+="**Date:** $DATE\n\n"
+        BODY+="### 📋 Merged Commits:\n\n${{ steps.get-commits.outputs.commit_list }}\n---\n"
+        ESCAPED_BODY=$(printf '%s' "$BODY" | sed 's/%/%25/g; s/$/%0A/g')
+        echo "body=$ESCAPED_BODY" >> $GITHUB_OUTPUT
 
     - name: Post update to feed
+      if: steps.pr-info.outputs.skip != 'true'
       id: post-to-feed
-      if: steps.check-author.outputs.skip != 'true'
       uses: augur-ai/augur-actions/actions/post-feed-update@main
       with:
         api_url: ${{ inputs.api_url }}
