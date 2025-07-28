@@ -1,0 +1,42 @@
+name: Test Augur Feed Update Action
+
+on:
+  workflow_dispatch:
+    inputs:
+      event_type:
+        description: "Event type to test"
+        required: true
+        default: "TEST"
+      data_variables:
+        description: "Data variables (JSON)"
+        required: false
+        default: '{"data.name": "Test User5", "commit_id": "34dd1r4a"}'
+      custom_timestamp:
+        description: "Custom timestamp (optional)"
+        required: false
+        default: ""
+
+jobs:
+  test-augur-feed-update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout action
+        uses: actions/checkout@v4
+
+      - name: Test augur-feed-update action
+        uses: ./
+        with:
+          api_url: "http://localhost:8000"
+          api_key: "bd7e5a7cfd396159a3d67711ea80f05b1765790bc93391a8638591b6fb2857ea1e7885b85cc6966ccbebdb394859e464"
+          feed_id: "10fe784a-4572-4ea7-b28b-24061269d962"
+          event_type: ${{ github.event.inputs.event_type }}
+          source: "github-action-test"
+          data_variables: ${{ github.event.inputs.data_variables }}
+          timestamp: ${{ github.event.inputs.custom_timestamp }}
+
+      - name: Display results
+        run: |
+          echo "🎉 Action completed successfully!"
+          echo "Status Code: ${{ steps.test-augur-feed-update.outputs.status_code }}"
+          echo "Success: ${{ steps.test-augur-feed-update.outputs.success }}"
+          echo "Response: ${{ steps.test-augur-feed-update.outputs.response_body }}"

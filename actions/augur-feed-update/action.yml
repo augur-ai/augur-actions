@@ -1,0 +1,152 @@
+name: "Augur Feed Update"
+description: "Send webhook requests to Augur API with dynamic data variables"
+author: "augur-ai"
+
+inputs:
+  api_url:
+    description: "Base URL for the Augur API"
+    required: true
+  api_key:
+    description: "API key for authentication"
+    required: true
+  feed_id:
+    description: "Feed ID for the webhook endpoint"
+    required: true
+  event_type:
+    description: "Type of event being sent"
+    required: true
+    default: "TEST"
+  source:
+    description: "Source identifier for the event"
+    required: true
+    default: "github-action"
+  data_variables:
+    description: "JSON object containing dynamic data variables to include in the request"
+    required: false
+    default: "{}"
+  timestamp:
+    description: "Custom timestamp (ISO 8601 format). If not provided, current timestamp will be used"
+    required: false
+
+outputs:
+  status_code:
+    description: "HTTP status code from the API response"
+  response_body:
+    description: "Response body from the API"
+  success:
+    description: "Whether the request was successful (true/false)"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Validate inputs
+      id: validate
+      shell: bash
+      run: |
+        # Validate required inputs
+        if [[ -z "${{ inputs.api_url }}" ]]; then
+          echo "❌ api_url is required"
+          exit 1
+        fi
+        if [[ -z "${{ inputs.api_key }}" ]]; then
+          echo "❌ api_key is required"
+          exit 1
+        fi
+        if [[ -z "${{ inputs.feed_id }}" ]]; then
+          echo "❌ feed_id is required"
+          exit 1
+        fi
+        echo "✅ Input validation passed"
+
+    - name: Prepare request data
+      id: prepare-data
+      shell: bash
+      run: |
+        # Generate timestamp if not provided
+        TIMESTAMP="${{ inputs.timestamp }}"
+        if [[ -z "$TIMESTAMP" ]]; then
+          TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%S.%3NZ")
+        fi
+        # Write data_variables to a file
+        echo '${{ inputs.data_variables }}' > /tmp/data_vars.json
+        # Use jq to construct the payload
+        PAYLOAD=$(jq -n --arg type "${{ inputs.event_type }}" \
+                      --arg timestamp "$TIMESTAMP" \
+                      --arg source "${{ inputs.source }}" \
+                      --slurpfile data /tmp/data_vars.json \
+                      '{type: $type, timestamp: $timestamp, source: $source, data: $data[0]}')
+        # Validate the generated JSON
+        if ! echo "$PAYLOAD" | jq empty 2>/dev/null; then
+          echo "❌ Failed to generate valid JSON payload"
+          exit 1
+        fi
+        # Write payload to file to avoid URL encoding issues
+        echo "$PAYLOAD" > /tmp/payload.json
+        echo "timestamp=$TIMESTAMP" >> $GITHUB_OUTPUT
+        echo "📦 Request payload prepared:"
+        echo "$PAYLOAD"
+
+    - name: Send webhook request
+      id: send-request
+      shell: bash
+      run: |
+        # Construct the full API URL
+        API_URL="${{ inputs.api_url }}/api/v1/webhook/feed/events/${{ inputs.feed_id }}"
+        echo "🌐 Sending request to: $API_URL"
+        echo "🔑 API Key: ${{ inputs.api_key }}"
+
+        # Test connectivity first
+        echo "🔍 Testing connectivity..."
+        if ! curl -s --connect-timeout 5 "${{ inputs.api_url }}" > /dev/null; then
+          echo "❌ Cannot connect to API server"
+          exit 1
+        fi
+        echo "✅ Connectivity test passed"
+
+        # Send the request with payload from file
+        echo "📤 Sending request..."
+        RESPONSE=$(curl -v -s -w "\n%{http_code}" \
+          --location "$API_URL" \
+          --header "Content-Type: application/json" \
+          --header "x-api-key: ${{ inputs.api_key }}" \
+          --data @/tmp/payload.json \
+          --max-time 30 \
+          --retry 3 \
+          --retry-delay 1 2>&1)
+
+        echo "📥 Raw response: $RESPONSE"
+
+        # Extract status code and response body
+        STATUS_CODE=$(echo "$RESPONSE" | tail -n1)
+        RESPONSE_BODY=$(echo "$RESPONSE" | sed '$d')
+
+        # Escape outputs for GitHub Actions
+        RESPONSE_BODY_ESCAPED="${RESPONSE_BODY//'%'/'%25'}"
+        RESPONSE_BODY_ESCAPED="${RESPONSE_BODY_ESCAPED//$'\n'/'%0A'}"
+
+        echo "status_code=$STATUS_CODE" >> $GITHUB_OUTPUT
+        echo "response_body=$RESPONSE_BODY_ESCAPED" >> $GITHUB_OUTPUT
+
+        # Determine success
+        if [[ "$STATUS_CODE" -ge 200 && "$STATUS_CODE" -lt 300 ]]; then
+          echo "success=true" >> $GITHUB_OUTPUT
+          echo "✅ Request successful (Status: $STATUS_CODE)"
+        else
+          echo "success=false" >> $GITHUB_OUTPUT
+          echo "❌ Request failed (Status: $STATUS_CODE)"
+          echo "Response: $RESPONSE_BODY"
+          exit 1
+        fi
+
+    - name: Display results
+      shell: bash
+      run: |
+        echo "📊 Request Summary:"
+        echo "- Status Code: ${{ steps.send-request.outputs.status_code }}"
+        echo "- Success: ${{ steps.send-request.outputs.success }}"
+        echo "- Timestamp: ${{ steps.prepare-data.outputs.timestamp }}"
+        if [[ "${{ steps.send-request.outputs.success }}" == "true" ]]; then
+          echo "🎉 Webhook sent successfully!"
+        else
+          echo "💥 Webhook failed to send"
+        fi
