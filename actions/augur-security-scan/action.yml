@@ -295,7 +295,7 @@ runs:
       shell: bash
       run: |
         echo "🔍 Validating feed data before sending..."
-        
+
         # Check if feed_data.json exists and is valid JSON
         if [[ -f "feed_data.json" ]]; then
           echo "✅ Feed data file exists"

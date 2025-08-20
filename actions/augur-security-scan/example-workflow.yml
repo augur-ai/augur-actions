@@ -95,7 +95,7 @@ jobs:
         with:
           api_url: ${{ secrets.AUGUR_API_URL }}
           api_key: ${{ secrets.AUGUR_API_KEY }}
-          feed_id: ${{ secrets.AUGUR_FEED_ID }}
+          feed_id: ${{ secrets.AUGUR_RELEASE_FEED_ID }}
       
       - name: Show SARIF Data
         run: |
