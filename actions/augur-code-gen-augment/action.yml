@@ -1,0 +1,214 @@
+name: Augur Code-Gen Augment Trigger
+
+on:
+  repository_dispatch:
+    types: [augment-code-trigger]
+  workflow_dispatch:
+    inputs:
+      augment_prompt:
+        description: "Describe the coding task or prompt for Augment Agent"
+        required: true
+        type: string
+
+jobs:
+  trigger_augment_agent:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Extract prompt from trigger
+        id: extract_prompt
+        shell: bash
+        env:
+          DISPATCH_PROMPT: ${{ github.event.client_payload.prompt }}
+          INPUT_PROMPT: ${{ github.event.inputs.augment_prompt }}
+        run: |
+          if [[ "${{ github.event_name }}" == "repository_dispatch" ]]; then
+            {
+              echo 'prompt<<EOF'
+              echo "$DISPATCH_PROMPT"
+              echo 'EOF'
+            } >> $GITHUB_OUTPUT
+          else
+            {
+              echo 'prompt<<EOF'
+              echo "$INPUT_PROMPT"
+              echo 'EOF'
+            } >> $GITHUB_OUTPUT
+          fi
+
+      - name: Install Auggie CLI
+        shell: bash
+        run: |
+          echo "📦 Installing Auggie CLI..."
+          npm install -g @augmentcode/auggie
+          echo "✅ Auggie CLI installed successfully"
+
+      - name: Authenticate with Augment
+        shell: bash
+        env:
+          AUGMENT_API_KEY: ${{ secrets.AUGMENT_API_KEY }}
+        run: |
+          echo "🔑 Authenticating with Augment..."
+          if [[ -z "$AUGMENT_API_KEY" ]]; then
+            echo "❌ AUGMENT_API_KEY secret is not set"
+            echo "Please add your Augment API key as a repository secret named AUGMENT_API_KEY"
+            exit 1
+          fi
+
+          # Authenticate with Auggie CLI using --login flag
+          auggie --login || {
+            echo "❌ Failed to authenticate with Augment"
+            echo "Please verify your AUGMENT_API_KEY is correct and you have access to Augment"
+            echo "You may need to set up authentication differently - check Auggie CLI documentation"
+            exit 1
+          }
+          echo "✅ Authentication successful"
+
+      - name: Run Augment Agent
+        id: augment_agent
+        shell: bash
+        run: |
+          echo "🤖 Running Augment Agent..."
+          echo "📝 Prompt: ${{ steps.extract_prompt.outputs.prompt }}"
+          echo "📁 Working directory: $(pwd)"
+          echo "📊 Repository info: ${{ github.repository }}"
+
+          # Create a temporary file for the prompt to handle multiline prompts properly
+          PROMPT_FILE=$(mktemp)
+          echo "${{ steps.extract_prompt.outputs.prompt }}" > "$PROMPT_FILE"
+
+          # Run Auggie with the prompt in print mode for automation
+          echo "🚀 Executing Auggie CLI..."
+          set +e  # Don't exit on error, we want to capture it
+          RESPONSE=$(auggie --print --quiet "$(cat "$PROMPT_FILE")" 2>&1)
+          EXIT_CODE=$?
+          set -e  # Re-enable exit on error
+
+          # Clean up temp file
+          rm -f "$PROMPT_FILE"
+
+          # Store response in output
+          echo "response<<EOF" >> $GITHUB_OUTPUT
+          echo "$RESPONSE" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+          # Store exit code and conclusion
+          echo "exit_code=$EXIT_CODE" >> $GITHUB_OUTPUT
+
+          if [[ $EXIT_CODE -eq 0 ]]; then
+            echo "conclusion=success" >> $GITHUB_OUTPUT
+            echo "✅ Augment Agent completed successfully"
+            echo "📄 Response preview (first 500 chars):"
+            echo "$RESPONSE" | head -c 500
+            if [[ ${#RESPONSE} -gt 500 ]]; then
+              echo "... (truncated)"
+            fi
+          else
+            echo "conclusion=failure" >> $GITHUB_OUTPUT
+            echo "❌ Augment Agent failed with exit code $EXIT_CODE"
+            echo "📄 Error details:"
+            echo "$RESPONSE"
+            exit $EXIT_CODE
+          fi
+
+      - name: Check for changes
+        id: check_changes
+        run: |
+          if [[ -n $(git status --porcelain) ]]; then
+            echo "changes=true" >> $GITHUB_OUTPUT
+            echo "Changes detected:"
+            git status --short
+          else
+            echo "changes=false" >> $GITHUB_OUTPUT
+            echo "No changes detected"
+          fi
+
+      - name: Create Pull Request with Generated Code
+        id: create_pr
+        if: steps.check_changes.outputs.changes == 'true'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          commit-message: "AI-generated code changes by Augment Agent"
+          title: "[Augment] ${{ steps.extract_prompt.outputs.prompt }}"
+          body: |
+            ## AI-Generated Code Changes by Augment
+
+            **Prompt:**
+            ```
+            ${{ steps.extract_prompt.outputs.prompt }}
+            ```
+
+            This pull request contains code changes generated by Augment's AI agent using the industry-leading context engine.
+
+            ### Execution Details:
+            - **Status:** ${{ steps.augment_agent.outputs.conclusion }}
+            - **Exit Code:** ${{ steps.augment_agent.outputs.exit_code }}
+            - **Model Used:** Augment Agent (with advanced context awareness)
+            - **Tools Used:** Auggie CLI with full codebase context
+            - **Repository:** ${{ github.repository }}
+            - **Branch:** ${{ github.ref_name }}
+
+            ### Agent Response:
+            <details>
+            <summary>Click to view Augment Agent's detailed response</summary>
+
+            ```
+            ${{ steps.augment_agent.outputs.response }}
+            ```
+            </details>
+
+            ### Changes Made:
+            - Code generated based on the provided prompt
+            - Automated commit by Augment workflow
+            - All changes reviewed by AI for code quality and conventions
+
+            ### Augment Agent Approach:
+            1. **Context Analysis**: Leveraged Augment's world-leading context engine to understand your codebase
+            2. **Pattern Recognition**: Identified existing code patterns and conventions
+            3. **Intelligent Generation**: Generated code that follows your project's best practices
+            4. **Quality Assurance**: Ensured generated code integrates seamlessly with existing codebase
+
+            **Generated by:** [Augment Code](https://www.augmentcode.com/) | **Workflow:** ${{ github.workflow }} | **Run ID:** ${{ github.run_id }}
+
+            ---
+            *This PR was automatically created by Augment Agent. Please review the changes carefully before merging.*
+          branch: augment-code-gen-${{ github.run_id }}
+          delete-branch: true
+          labels: |
+            augment-code-gen
+            ai-generated
+            augment-agent
+
+      - name: Log completion
+        run: |
+          echo "✅ Augment Code-Gen workflow completed!"
+          echo "📊 Execution Summary:"
+          echo "  - Status: ${{ steps.augment_agent.outputs.conclusion }}"
+          echo "  - Exit Code: ${{ steps.augment_agent.outputs.exit_code }}"
+          echo "  - Changes Detected: ${{ steps.check_changes.outputs.changes }}"
+
+          if [ "${{ steps.check_changes.outputs.changes }}" == "true" ]; then
+            if [ "${{ steps.create_pr.outputs.pull-request-number }}" != "" ]; then
+              echo "🔗 Pull Request created: ${{ steps.create_pr.outputs.pull-request-url }}"
+              echo "📝 PR #${{ steps.create_pr.outputs.pull-request-number }}: ${{ steps.create_pr.outputs.pull-request-operation }}"
+            else
+              echo "⚠️ Changes were detected but PR creation may have failed"
+            fi
+          else
+            echo "ℹ️ No changes were made by Augment Agent"
+          fi
+
+          echo ""
+          echo "🤖 Agent Response Summary:"
+          echo "${{ steps.augment_agent.outputs.response }}" | head -n 10
+          if [[ $(echo "${{ steps.augment_agent.outputs.response }}" | wc -l) -gt 10 ]]; then
+            echo "... (see PR description for full response)"
+          fi

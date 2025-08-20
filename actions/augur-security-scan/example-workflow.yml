@@ -1,0 +1,83 @@
+# Minimal Security Scan Examples
+# Just copy & paste - that's it!
+
+# ==========================================
+# EXAMPLE 1: One Step Setup (Most Common)
+# Auto-detects languages + sends SARIF to Augur
+# ==========================================
+name: Security Scan
+on: [push, pull_request]
+
+jobs:
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: augur-ai/augur-actions/actions/augur-security-scan@main
+
+# ==========================================
+# EXAMPLE 2: With Augur Feed Notifications
+# ==========================================
+name: Security with Augur
+on: [push]
+
+jobs:
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: augur-ai/augur-actions/actions/augur-security-scan@main
+        with:
+          api_url: ${{ secrets.AUGUR_API_URL }}
+          api_key: ${{ secrets.AUGUR_API_KEY }}
+          feed_id: ${{ secrets.AUGUR_FEED_ID }}
+
+# ==========================================
+# EXAMPLE 3: Specific Languages Only
+# ==========================================
+name: Python & JavaScript Security
+on: [push]
+
+jobs:
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: augur-ai/augur-actions/actions/augur-security-scan@main
+        with:
+          languages: "python,javascript"
+
+# ==========================================
+# EXAMPLE 4: Fail on Issues
+# ==========================================
+name: Strict Security
+on: [push, pull_request]
+
+jobs:
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: augur-ai/augur-actions/actions/augur-security-scan@main
+        with:
+          fail_on_issues: "true"
+
+# ==========================================
+# EXAMPLE 5: Weekly Scheduled Scan
+# ==========================================
+name: Weekly Security Check
+on:
+  schedule:
+    - cron: "0 9 * * 1" # Monday 9 AM
+
+jobs:
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: augur-ai/augur-actions/actions/augur-security-scan@main
+
+# ==========================================
+# That's it! Pick any example above.
+# No complex configurations needed! 🚀
+# ==========================================

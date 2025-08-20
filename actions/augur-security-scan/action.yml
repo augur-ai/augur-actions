@@ -1,0 +1,208 @@
+name: "Augur Security Scan"
+description: "Universal security scanner with CodeQL auto-detection and JSON webhook notifications"
+author: "augur-ai"
+
+inputs:
+  api_url:
+    description: "Base URL for the Augur API"
+    required: false
+  api_key:
+    description: "API key for authentication"
+    required: false
+  feed_id:
+    description: "Feed ID for notifications"
+    required: false
+  languages:
+    description: "Languages to scan (auto-detect if not specified)"
+    required: false
+    default: ""
+  fail_on_issues:
+    description: "Fail workflow if security issues found"
+    required: false
+    default: "false"
+
+outputs:
+  results_count:
+    description: "Number of security findings"
+    value: ${{ steps.scan.outputs.results_count }}
+  status:
+    description: "Scan status (success/failed)"
+    value: ${{ steps.scan.outputs.status }}
+  languages_detected:
+    description: "Languages that were scanned"
+    value: ${{ steps.scan.outputs.languages_detected }}
+  feed_status:
+    description: "Augur feed update status"
+    value: ${{ steps.feed-update.outputs.success }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Initialize CodeQL
+      uses: github/codeql-action/init@v3
+      with:
+        languages: ${{ inputs.languages }} # Auto-detects if empty
+
+    - name: Autobuild
+      uses: github/codeql-action/autobuild@v3
+
+    - name: Perform CodeQL Analysis
+      id: analyze
+      uses: github/codeql-action/analyze@v3
+      with:
+        output: sarif-results
+        upload: false
+
+    - name: Process Results and Send Webhook
+      id: scan
+      shell: bash
+      run: |
+        echo "🔒 Processing Augur Security Scan Results..."
+
+        # Find SARIF files
+        SARIF_FILES=$(find sarif-results -name "*.sarif" 2>/dev/null || echo "")
+
+        if [[ -z "$SARIF_FILES" ]]; then
+          echo "⚠️ No SARIF files found - using fallback scan"
+          
+          # Simple fallback scan
+          TOTAL_FILES=0
+          TOTAL_FINDINGS=0
+          LANGUAGES_FOUND=""
+          
+          # Check for different languages
+          if find . -name "*.js" -o -name "*.ts" -o -name "*.jsx" -o -name "*.tsx" | head -1 | grep -q .; then
+            JS_FILES=$(find . -name "*.js" -o -name "*.ts" -o -name "*.jsx" -o -name "*.tsx" | wc -l)
+            TOTAL_FILES=$((TOTAL_FILES + JS_FILES))
+            LANGUAGES_FOUND="javascript"
+            
+            # Basic JS security patterns
+            EVAL_COUNT=$(grep -r "eval(" --include="*.js" --include="*.ts" --include="*.jsx" --include="*.tsx" . | wc -l || echo "0")
+            INNERHTML_COUNT=$(grep -r "innerHTML" --include="*.js" --include="*.ts" --include="*.jsx" --include="*.tsx" . | wc -l || echo "0")
+            TOTAL_FINDINGS=$((TOTAL_FINDINGS + EVAL_COUNT + INNERHTML_COUNT))
+          fi
+          
+          if find . -name "*.py" | head -1 | grep -q .; then
+            PY_FILES=$(find . -name "*.py" | wc -l)
+            TOTAL_FILES=$((TOTAL_FILES + PY_FILES))
+            [[ -n "$LANGUAGES_FOUND" ]] && LANGUAGES_FOUND="$LANGUAGES_FOUND,python" || LANGUAGES_FOUND="python"
+            
+            # Basic Python security patterns
+            EXEC_COUNT=$(grep -r "exec(" --include="*.py" . | wc -l || echo "0")
+            EVAL_COUNT=$(grep -r "eval(" --include="*.py" . | wc -l || echo "0")
+            TOTAL_FINDINGS=$((TOTAL_FINDINGS + EXEC_COUNT + EVAL_COUNT))
+          fi
+          
+          if find . -name "*.java" | head -1 | grep -q .; then
+            JAVA_FILES=$(find . -name "*.java" | wc -l)
+            TOTAL_FILES=$((TOTAL_FILES + JAVA_FILES))
+            [[ -n "$LANGUAGES_FOUND" ]] && LANGUAGES_FOUND="$LANGUAGES_FOUND,java" || LANGUAGES_FOUND="java"
+            
+            # Basic Java security patterns
+            RUNTIME_COUNT=$(grep -r "Runtime.getRuntime().exec" --include="*.java" . | wc -l || echo "0")
+            TOTAL_FINDINGS=$((TOTAL_FINDINGS + RUNTIME_COUNT))
+          fi
+          
+          SCAN_TYPE="fallback"
+          
+        else
+          echo "📄 Found SARIF files, processing CodeQL results..."
+          
+          # Process all SARIF files
+          TOTAL_FINDINGS=0
+          LANGUAGES_FOUND=""
+          
+          for SARIF_FILE in $SARIF_FILES; do
+            echo "Processing: $SARIF_FILE"
+            
+            # Count findings in this SARIF file
+            FILE_FINDINGS=$(jq '[.runs[].results // []] | add | length' "$SARIF_FILE" 2>/dev/null || echo "0")
+            TOTAL_FINDINGS=$((TOTAL_FINDINGS + FILE_FINDINGS))
+            
+            # Extract language from SARIF
+            LANG=$(jq -r '.runs[0].tool.driver.name // "unknown"' "$SARIF_FILE" 2>/dev/null || echo "unknown")
+            if [[ "$LANG" != "unknown" && "$LANG" != "null" ]]; then
+              [[ -n "$LANGUAGES_FOUND" ]] && LANGUAGES_FOUND="$LANGUAGES_FOUND,$LANG" || LANGUAGES_FOUND="$LANG"
+            fi
+            
+            echo "  - Language: $LANG"
+            echo "  - Findings: $FILE_FINDINGS"
+          done
+          
+          # Remove duplicates from languages
+          LANGUAGES_FOUND=$(echo "$LANGUAGES_FOUND" | tr ',' '\n' | sort -u | tr '\n' ',' | sed 's/,$//')
+          
+          # Count total files scanned (estimate)
+          TOTAL_FILES=$(find . -name "*.js" -o -name "*.ts" -o -name "*.py" -o -name "*.java" -o -name "*.go" -o -name "*.cs" -o -name "*.cpp" -o -name "*.c" | wc -l)
+          
+          SCAN_TYPE="codeql"
+        fi
+
+        echo ""
+        echo "📊 Scan Summary:"
+        echo "- Type: $SCAN_TYPE"
+        echo "- Languages: ${LANGUAGES_FOUND:-"none detected"}"
+        echo "- Files: $TOTAL_FILES"
+        echo "- Findings: $TOTAL_FINDINGS"
+
+        # Prepare SARIF data for feed update
+        SARIF_DATA="{}"
+        if [[ "$SCAN_TYPE" == "codeql" && -n "$SARIF_FILES" ]]; then
+          FIRST_SARIF=$(echo "$SARIF_FILES" | head -1)
+          # Escape SARIF data for JSON
+          SARIF_DATA=$(cat "$FIRST_SARIF" | jq -c .)
+        fi
+
+        # Create data variables for feed update
+        cat > feed_data.json << EOF
+        {
+          "repository": "${{ github.repository }}",
+          "branch": "${{ github.ref_name }}",
+          "commit": "${{ github.sha }}",
+          "scan_type": "$SCAN_TYPE",
+          "languages": "${LANGUAGES_FOUND:-none}",
+          "total_files": $TOTAL_FILES,
+          "total_findings": $TOTAL_FINDINGS,
+          "workflow_run": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}",
+          "sarif_data": $SARIF_DATA
+        }
+        EOF
+
+        echo "📊 Prepared security scan data for feed update"
+
+        # Set outputs
+        echo "results_count=$TOTAL_FINDINGS" >> $GITHUB_OUTPUT
+        echo "status=success" >> $GITHUB_OUTPUT
+        echo "languages_detected=${LANGUAGES_FOUND:-none}" >> $GITHUB_OUTPUT
+        echo "feed_data=$(cat feed_data.json)" >> $GITHUB_OUTPUT
+
+        # Final summary
+        echo ""
+        echo "🎯 Final Summary:"
+        echo "Repository: ${{ github.repository }}"
+        echo "Languages: ${LANGUAGES_FOUND:-none}"
+        echo "Findings: $TOTAL_FINDINGS"
+        echo "Status: Success"
+
+        # Check if should fail
+        if [[ "${{ inputs.fail_on_issues }}" == "true" && $TOTAL_FINDINGS -gt 0 ]]; then
+          echo "❌ Failing due to security findings"
+          exit 1
+        fi
+
+        echo "✅ Security scan completed successfully!"
+
+    - name: Send Augur Feed Update
+      id: feed-update
+      if: inputs.api_url != '' && inputs.api_key != '' && inputs.feed_id != ''
+      uses: augur-ai/augur-actions/actions/augur-feed-update@main
+      with:
+        api_url: ${{ inputs.api_url }}
+        api_key: ${{ inputs.api_key }}
+        feed_id: ${{ inputs.feed_id }}
+        event_type: "security_scan_completed"
+        source: "github-security-scan"
+        data_variables: ${{ steps.scan.outputs.feed_data }}

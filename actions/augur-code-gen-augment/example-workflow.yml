@@ -1,0 +1,31 @@
+# Example workflow showing how to use the Augment Code Generation action
+# Save this as .github/workflows/augment-code-gen.yml in your repository
+
+name: Augment Code Generation
+
+on:
+  # Manual trigger from GitHub Actions UI
+  workflow_dispatch:
+    inputs:
+      augment_prompt:
+        description: "Describe the coding task for Augment Agent"
+        required: true
+        type: string
+        default: "Add comprehensive error handling to the main application module"
+
+  # Programmatic trigger via repository dispatch
+  repository_dispatch:
+    types: [augment-code-trigger]
+
+jobs:
+  generate-code:
+    name: Generate Code with Augment
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Generate Code with Augment Agent
+        uses: augur-ai/augur-actions/actions/augur-code-gen-augment@main
+        with:
+          augment_prompt: ${{ github.event.inputs.augment_prompt || github.event.client_payload.prompt }}
+        env:
+          AUGMENT_API_KEY: ${{ secrets.AUGMENT_API_KEY }}
