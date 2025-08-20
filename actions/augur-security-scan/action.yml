@@ -156,28 +156,44 @@ runs:
           SARIF_DATA=$(cat "$FIRST_SARIF" | jq -c .)
         fi
 
-        # Create data variables for feed update
-        cat > feed_data.json << EOF
-        {
-          "repository": "${{ github.repository }}",
-          "branch": "${{ github.ref_name }}",
-          "commit": "${{ github.sha }}",
-          "scan_type": "$SCAN_TYPE",
-          "languages": "${LANGUAGES_FOUND:-none}",
-          "total_files": $TOTAL_FILES,
-          "total_findings": $TOTAL_FINDINGS,
-          "workflow_run": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}",
-          "sarif_data": $SARIF_DATA
-        }
-        EOF
+        # Create data variables for feed update using jq for proper JSON formatting
+        jq -n \
+          --arg repository "${{ github.repository }}" \
+          --arg branch "${{ github.ref_name }}" \
+          --arg commit "${{ github.sha }}" \
+          --arg scan_type "$SCAN_TYPE" \
+          --arg languages "${LANGUAGES_FOUND:-none}" \
+          --arg total_files "$TOTAL_FILES" \
+          --arg total_findings "$TOTAL_FINDINGS" \
+          --arg workflow_run "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+          --argjson sarif_data "$SARIF_DATA" \
+          '{
+            repository: $repository,
+            branch: $branch,
+            commit: $commit,
+            scan_type: $scan_type,
+            languages: $languages,
+            total_files: ($total_files | tonumber),
+            total_findings: ($total_findings | tonumber),
+            workflow_run: $workflow_run,
+            sarif_data: $sarif_data
+          }' > feed_data.json
 
         echo "📊 Prepared security scan data for feed update"
+        echo "🔍 Feed data preview:"
+        head -5 feed_data.json
 
         # Set outputs
         echo "results_count=$TOTAL_FINDINGS" >> $GITHUB_OUTPUT
         echo "status=success" >> $GITHUB_OUTPUT
         echo "languages_detected=${LANGUAGES_FOUND:-none}" >> $GITHUB_OUTPUT
-        echo "feed_data=$(cat feed_data.json)" >> $GITHUB_OUTPUT
+        
+        # Set feed_data output with proper escaping
+        {
+          echo 'feed_data<<EOF'
+          cat feed_data.json
+          echo 'EOF'
+        } >> $GITHUB_OUTPUT
 
         # Final summary
         echo ""
