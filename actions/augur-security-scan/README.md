@@ -22,8 +22,9 @@ CodeQL security scanning with automatic language detection. Optionally sends SAR
 
 - ✅ **Auto-detects** all supported languages in your repo
 - ✅ **Runs CodeQL** security analysis with full SARIF output
-- ✅ **Optionally sends SARIF results** to Augur feed (if configured)
-- ✅ **Never breaks** your build (unless you want it to)
+- ✅ **Falls back gracefully** if CodeQL fails (syntax errors, missing permissions, etc.)
+- ✅ **Optionally sends results** to Augur feed (if configured)
+- ✅ **Never breaks** your build (resilient to code issues)
 
 ## 🌍 Supported Languages
 
@@ -198,20 +199,30 @@ The action automatically integrates with GitHub's security features. Results app
 
 ## 🛠️ Troubleshooting
 
+**CodeQL fails due to syntax errors?**
+
+- ✅ **Action continues automatically** - uses fallback pattern scanning
+- No action needed - the scan will complete with basic security checks
+
+**"Advanced Security must be enabled" error?**
+
+- ✅ **Action continues automatically** - falls back to pattern-based scanning
+- Optional: Enable GitHub Advanced Security for full CodeQL analysis
+
+**"jq: Argument list too long" error?**
+
+- ✅ **Action handles this automatically** - limits SARIF file size processing
+- Large SARIF files are summarized instead of included in full
+
 **No languages detected?**
 
 - Ensure your code files are in the repository root or subdirectories
 - Check that file extensions match supported languages
 
-**CodeQL fails?**
+**Augur feed not receiving data?**
 
-- Action automatically falls back to pattern-based scanning
-- Check GitHub Actions logs for specific error messages
-
-**Webhook not receiving data?**
-
-- Verify webhook URL is accessible
-- Check webhook endpoint accepts POST requests with JSON
+- Verify `api_url`, `api_key`, and `feed_id` are correctly configured
+- Check that the Augur API endpoint is accessible
 
 ## 🔗 Integration Examples
 

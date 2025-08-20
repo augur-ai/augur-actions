@@ -42,12 +42,16 @@ runs:
       uses: actions/checkout@v4
 
     - name: Initialize CodeQL
+      id: init
       uses: github/codeql-action/init@v3
       with:
         languages: ${{ inputs.languages }} # Auto-detects if empty
+      continue-on-error: true
 
     - name: Autobuild
+      id: autobuild
       uses: github/codeql-action/autobuild@v3
+      continue-on-error: true
 
     - name: Perform CodeQL Analysis
       id: analyze
@@ -55,6 +59,7 @@ runs:
       with:
         output: sarif-results
         upload: false
+      continue-on-error: true
 
     - name: Process Results and Send Webhook
       id: scan
@@ -62,11 +67,21 @@ runs:
       run: |
         echo "🔒 Processing Augur Security Scan Results..."
 
+        # Check if CodeQL steps succeeded
+        CODEQL_SUCCESS="true"
+        if [[ "${{ steps.init.outcome }}" != "success" || "${{ steps.autobuild.outcome }}" != "success" || "${{ steps.analyze.outcome }}" != "success" ]]; then
+          CODEQL_SUCCESS="false"
+          echo "⚠️ CodeQL analysis failed or was skipped - using fallback scan"
+          echo "  - Init: ${{ steps.init.outcome }}"
+          echo "  - Autobuild: ${{ steps.autobuild.outcome }}"
+          echo "  - Analyze: ${{ steps.analyze.outcome }}"
+        fi
+
         # Find SARIF files
         SARIF_FILES=$(find sarif-results -name "*.sarif" 2>/dev/null || echo "")
 
-        if [[ -z "$SARIF_FILES" ]]; then
-          echo "⚠️ No SARIF files found - using fallback scan"
+        if [[ -z "$SARIF_FILES" || "$CODEQL_SUCCESS" == "false" ]]; then
+          echo "⚠️ No SARIF files found or CodeQL failed - using fallback scan"
           
           # Simple fallback scan
           TOTAL_FILES=0
@@ -148,15 +163,28 @@ runs:
         echo "- Files: $TOTAL_FILES"
         echo "- Findings: $TOTAL_FINDINGS"
 
-        # Prepare SARIF data for feed update
+        # Prepare SARIF data for feed update (handle large files carefully)
         SARIF_DATA="{}"
         if [[ "$SCAN_TYPE" == "codeql" && -n "$SARIF_FILES" ]]; then
           FIRST_SARIF=$(echo "$SARIF_FILES" | head -1)
-          # Escape SARIF data for JSON
-          SARIF_DATA=$(cat "$FIRST_SARIF" | jq -c .)
+          if [[ -f "$FIRST_SARIF" ]]; then
+            # Check file size to avoid jq argument list issues
+            SARIF_SIZE=$(wc -c < "$FIRST_SARIF" 2>/dev/null || echo "0")
+            if [[ "$SARIF_SIZE" -lt 1048576 ]]; then  # Less than 1MB
+              echo "📄 Including full SARIF data (${SARIF_SIZE} bytes)"
+              SARIF_DATA=$(cat "$FIRST_SARIF" | jq -c . 2>/dev/null || echo '{}')
+            else
+              echo "⚠️ SARIF file too large (${SARIF_SIZE} bytes), including summary only"
+              # Create a summary instead of full SARIF
+              SARIF_DATA=$(jq -n --arg size "$SARIF_SIZE" '{"summary": "SARIF file too large for inclusion", "size_bytes": ($size | tonumber)}')
+            fi
+          fi
         fi
 
         # Create data variables for feed update using jq for proper JSON formatting
+        # Use a temp file to avoid argument list issues
+        echo "$SARIF_DATA" > sarif_temp.json
+
         jq -n \
           --arg repository "${{ github.repository }}" \
           --arg branch "${{ github.ref_name }}" \
@@ -166,7 +194,7 @@ runs:
           --arg total_files "$TOTAL_FILES" \
           --arg total_findings "$TOTAL_FINDINGS" \
           --arg workflow_run "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
-          --argjson sarif_data "$SARIF_DATA" \
+          --slurpfile sarif_data sarif_temp.json \
           '{
             repository: $repository,
             branch: $branch,
@@ -176,8 +204,11 @@ runs:
             total_files: ($total_files | tonumber),
             total_findings: ($total_findings | tonumber),
             workflow_run: $workflow_run,
-            sarif_data: $sarif_data
+            sarif_data: $sarif_data[0]
           }' > feed_data.json
+
+        # Clean up temp file
+        rm -f sarif_temp.json
 
         echo "📊 Prepared security scan data for feed update"
         echo "🔍 Feed data preview:"
@@ -201,15 +232,24 @@ runs:
         echo "Repository: ${{ github.repository }}"
         echo "Languages: ${LANGUAGES_FOUND:-none}"
         echo "Findings: $TOTAL_FINDINGS"
-        echo "Status: Success"
+        echo "Scan Type: $SCAN_TYPE"
+        if [[ "$CODEQL_SUCCESS" == "false" ]]; then
+          echo "CodeQL Status: Failed (used fallback scan)"
+        else
+          echo "CodeQL Status: Success"
+        fi
 
-        # Check if should fail
+        # Only fail on issues if explicitly requested AND we have findings
         if [[ "${{ inputs.fail_on_issues }}" == "true" && $TOTAL_FINDINGS -gt 0 ]]; then
-          echo "❌ Failing due to security findings"
+          echo "❌ Failing due to security findings (fail_on_issues=true)"
           exit 1
         fi
 
-        echo "✅ Security scan completed successfully!"
+        if [[ "$CODEQL_SUCCESS" == "false" ]]; then
+          echo "⚠️ Security scan completed with fallback (CodeQL issues ignored)"
+        else
+          echo "✅ Security scan completed successfully!"
+        fi
 
     - name: Send Augur Feed Update
       id: feed-update
