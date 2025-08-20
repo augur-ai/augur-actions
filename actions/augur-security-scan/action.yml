@@ -167,25 +167,78 @@ runs:
         if [[ "$SCAN_TYPE" == "codeql" && -n "$SARIF_FILES" ]]; then
           FIRST_SARIF=$(echo "$SARIF_FILES" | head -1)
           if [[ -f "$FIRST_SARIF" ]]; then
-            # Check file size to avoid issues
+            # Check file size to avoid issues (increase limit to 5MB)
             SARIF_SIZE=$(wc -c < "$FIRST_SARIF" 2>/dev/null || echo "0")
-            if [[ "$SARIF_SIZE" -lt 1048576 ]]; then  # Less than 1MB
+            if [[ "$SARIF_SIZE" -lt 5242880 ]]; then  # Less than 5MB
               echo "📄 Sending full SARIF data (${SARIF_SIZE} bytes)"
               cp "$FIRST_SARIF" feed_data.json
             else
-              echo "⚠️ SARIF file too large (${SARIF_SIZE} bytes), sending summary"
-              jq -n --arg size "$SARIF_SIZE" '{"error": "SARIF file too large for transmission", "size_bytes": ($size | tonumber)}' > feed_data.json
+              echo "⚠️ SARIF file too large (${SARIF_SIZE} bytes), creating summary"
+              # Create a meaningful SARIF summary with key findings
+              jq '{
+                "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+                "version": "2.1.0",
+                "runs": [
+                  {
+                    "tool": (.runs[0].tool // {"driver": {"name": "CodeQL"}}),
+                    "results": (.runs[0].results[0:20] // []),
+                    "summary": {
+                      "total_results": ([.runs[].results // []] | add | length),
+                      "high_severity": ([.runs[].results // [] | .[] | select(.level == "error" or .properties.severity == "high")] | length),
+                      "medium_severity": ([.runs[].results // [] | .[] | select(.level == "warning" or .properties.severity == "medium")] | length),
+                      "note": "SARIF truncated - showing first 20 results only",
+                      "original_size_bytes": '${SARIF_SIZE}'
+                    }
+                  }
+                ]
+              }' "$FIRST_SARIF" > feed_data.json 2>/dev/null || {
+                # Fallback if jq processing fails
+                jq -n --arg size "$SARIF_SIZE" --arg findings "$TOTAL_FINDINGS" '{
+                  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+                  "version": "2.1.0",
+                  "runs": [{
+                    "tool": {"driver": {"name": "CodeQL"}},
+                    "results": [],
+                    "summary": {
+                      "total_results": ($findings | tonumber),
+                      "note": "SARIF file too large for processing",
+                      "original_size_bytes": ($size | tonumber)
+                    }
+                  }]
+                }' > feed_data.json
+              }
             fi
           else
             echo "⚠️ No SARIF file found, sending empty result"
-            echo '{"error": "No SARIF data available"}' > feed_data.json
+            jq -n '{
+              "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+              "version": "2.1.0",
+              "runs": [{
+                "tool": {"driver": {"name": "CodeQL"}},
+                "results": [],
+                "summary": {"note": "No SARIF data available"}
+              }]
+            }' > feed_data.json
           fi
         else
           echo "⚠️ CodeQL failed, sending fallback result"
           jq -n \
             --arg total_findings "$TOTAL_FINDINGS" \
             --arg languages "${LANGUAGES_FOUND:-none}" \
-            '{"fallback_scan": true, "total_findings": ($total_findings | tonumber), "languages": $languages}' > feed_data.json
+            '{
+              "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+              "version": "2.1.0",
+              "runs": [{
+                "tool": {"driver": {"name": "Fallback Scanner"}},
+                "results": [],
+                "summary": {
+                  "fallback_scan": true,
+                  "total_findings": ($total_findings | tonumber),
+                  "languages": $languages,
+                  "note": "CodeQL analysis failed - used pattern-based fallback"
+                }
+              }]
+            }' > feed_data.json
         fi
 
         echo "📊 Prepared SARIF data for Augur feed"

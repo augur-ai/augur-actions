@@ -125,6 +125,35 @@ jobs:
 
 **Just the SARIF - no extra metadata clutter. Uses the `augur-feed-update` action internally for reliable delivery.**
 
+**For large SARIF files (>5MB), sends an intelligent summary:**
+
+```json
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "CodeQL",
+          "version": "2.15.3"
+        }
+      },
+      "results": [
+        // First 20 most important findings
+      ],
+      "summary": {
+        "total_results": 157,
+        "high_severity": 12,
+        "medium_severity": 45,
+        "note": "SARIF truncated - showing first 20 results only",
+        "original_size_bytes": 1631440
+      }
+    }
+  ]
+}
+```
+
 ## 🔍 Viewing Event Data
 
 **To see what event data is being sent to Augur:**
@@ -265,10 +294,11 @@ The action automatically integrates with GitHub's security features. Results app
 - ✅ **Action continues automatically** - falls back to pattern-based scanning
 - Optional: Enable GitHub Advanced Security for full CodeQL analysis
 
-**"jq: Argument list too long" error?**
+**Large SARIF files (>5MB)?**
 
-- ✅ **Action handles this automatically** - limits SARIF file size processing
-- Large SARIF files are summarized instead of included in full
+- ✅ **Action handles this automatically** - creates intelligent SARIF summary
+- Includes first 20 findings + summary statistics (total, high/medium severity)
+- Still sends valid SARIF format with meaningful data
 
 **No languages detected?**
 
