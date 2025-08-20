@@ -97,15 +97,15 @@ jobs:
           api_key: ${{ secrets.AUGUR_API_KEY }}
           feed_id: ${{ secrets.AUGUR_FEED_ID }}
       
-      - name: Show Event Data
+      - name: Show SARIF Data
         run: |
           echo "🔍 Scan Results:"
           echo "Languages: ${{ steps.scan.outputs.languages_detected }}"
           echo "Findings: ${{ steps.scan.outputs.results_count }}"
           echo "Feed Status: ${{ steps.scan.outputs.feed_status }}"
           echo ""
-          echo "📦 Event Data Sent:"
-          echo '${{ steps.scan.outputs.feed_data }}' | jq .
+          echo "📦 SARIF Data Sent:"
+          echo '${{ steps.scan.outputs.feed_data }}' | jq . | head -20
 
 # ==========================================
 # That's it! Pick any example above.

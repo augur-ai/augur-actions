@@ -95,54 +95,64 @@ jobs:
 
 ## 📊 Augur Feed Data
 
-**When configured, sends comprehensive security data to Augur feed:**
+**When configured, sends clean SARIF data to Augur feed:**
 
 ```json
 {
-  "repository": "owner/repo-name",
-  "branch": "main",
-  "commit": "abc123def456",
-  "scan_type": "codeql",
-  "languages": "javascript,python,java",
-  "total_files": 245,
-  "total_findings": 3,
-  "workflow_run": "https://github.com/owner/repo/actions/runs/123456",
-  "sarif_data": {
-    // Complete SARIF results with all security findings
-    "runs": [...],
-    "version": "2.1.0"
-  }
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "CodeQL",
+          "version": "2.15.3"
+        }
+      },
+      "results": [
+        {
+          "ruleId": "js/xss",
+          "message": {
+            "text": "Cross-site scripting vulnerability"
+          },
+          "locations": [...]
+        }
+      ]
+    }
+  ]
 }
 ```
 
-**Uses the `augur-feed-update` action internally for reliable delivery.**
+**Just the SARIF - no extra metadata clutter. Uses the `augur-feed-update` action internally for reliable delivery.**
 
 ## 🔍 Viewing Event Data
 
 **To see what event data is being sent to Augur:**
 
-1. **Check the workflow logs** - the action displays the full event payload:
+1. **Check the workflow logs** - the action displays the SARIF data being sent:
+
    ```
-   🔍 Event Data Being Sent to Augur:
-   ==================================
+   🔍 SARIF Data Being Sent:
+   =========================
    Event Type: security_scan_completed
    Source: github-security-scan
-   
-   📋 Feed Data Preview:
+   Data Size: 15847 bytes
+
+   📋 SARIF Preview (first 10 lines):
    {
-     "repository": "owner/repo",
-     "branch": "main",
-     "commit": "abc123",
-     "scan_type": "codeql",
-     "languages": "javascript,python",
-     "total_files": 150,
-     "total_findings": 3,
-     "workflow_run": "https://github.com/...",
-     "sarif_data": { ... }
-   }
+     "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+     "version": "2.1.0",
+     "runs": [
+       {
+         "tool": {
+           "driver": {
+             "name": "CodeQL",
+             "version": "2.15.3"
+   ...
    ```
 
 2. **Check delivery status** - see if the event was successfully sent:
+
    ```
    📤 Augur Event Delivery Summary:
    ===============================
@@ -154,12 +164,13 @@ jobs:
    ✅ Event successfully delivered to Augur!
    ```
 
-3. **Access via outputs** - use the event data in subsequent workflow steps:
+3. **Access via outputs** - use the SARIF data in subsequent workflow steps:
    ```yaml
-   - name: Show Event Data
+   - name: Show SARIF Data
      run: |
-       echo "Event data: ${{ steps.scan.outputs.feed_data }}"
+       echo "SARIF data: ${{ steps.scan.outputs.feed_data }}"
        echo "Delivery status: ${{ steps.scan.outputs.feed_status }}"
+       echo "Results count: ${{ steps.scan.outputs.results_count }}"
    ```
 
 ## 🔍 What Gets Scanned

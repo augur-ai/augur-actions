@@ -163,64 +163,42 @@ runs:
         echo "- Files: $TOTAL_FILES"
         echo "- Findings: $TOTAL_FINDINGS"
 
-        # Prepare SARIF data for feed update (handle large files carefully)
-        SARIF_DATA="{}"
+        # Just send the SARIF data directly - no extra clutter
         if [[ "$SCAN_TYPE" == "codeql" && -n "$SARIF_FILES" ]]; then
           FIRST_SARIF=$(echo "$SARIF_FILES" | head -1)
           if [[ -f "$FIRST_SARIF" ]]; then
-            # Check file size to avoid jq argument list issues
+            # Check file size to avoid issues
             SARIF_SIZE=$(wc -c < "$FIRST_SARIF" 2>/dev/null || echo "0")
             if [[ "$SARIF_SIZE" -lt 1048576 ]]; then  # Less than 1MB
-              echo "📄 Including full SARIF data (${SARIF_SIZE} bytes)"
-              SARIF_DATA=$(cat "$FIRST_SARIF" | jq -c . 2>/dev/null || echo '{}')
+              echo "📄 Sending full SARIF data (${SARIF_SIZE} bytes)"
+              cp "$FIRST_SARIF" feed_data.json
             else
-              echo "⚠️ SARIF file too large (${SARIF_SIZE} bytes), including summary only"
-              # Create a summary instead of full SARIF
-              SARIF_DATA=$(jq -n --arg size "$SARIF_SIZE" '{"summary": "SARIF file too large for inclusion", "size_bytes": ($size | tonumber)}')
+              echo "⚠️ SARIF file too large (${SARIF_SIZE} bytes), sending summary"
+              jq -n --arg size "$SARIF_SIZE" '{"error": "SARIF file too large for transmission", "size_bytes": ($size | tonumber)}' > feed_data.json
             fi
+          else
+            echo "⚠️ No SARIF file found, sending empty result"
+            echo '{"error": "No SARIF data available"}' > feed_data.json
           fi
+        else
+          echo "⚠️ CodeQL failed, sending fallback result"
+          jq -n \
+            --arg total_findings "$TOTAL_FINDINGS" \
+            --arg languages "${LANGUAGES_FOUND:-none}" \
+            '{"fallback_scan": true, "total_findings": ($total_findings | tonumber), "languages": $languages}' > feed_data.json
         fi
 
-        # Create data variables for feed update using jq for proper JSON formatting
-        # Use a temp file to avoid argument list issues
-        echo "$SARIF_DATA" > sarif_temp.json
-
-        jq -n \
-          --arg repository "${{ github.repository }}" \
-          --arg branch "${{ github.ref_name }}" \
-          --arg commit "${{ github.sha }}" \
-          --arg scan_type "$SCAN_TYPE" \
-          --arg languages "${LANGUAGES_FOUND:-none}" \
-          --arg total_files "$TOTAL_FILES" \
-          --arg total_findings "$TOTAL_FINDINGS" \
-          --arg workflow_run "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
-          --slurpfile sarif_data sarif_temp.json \
-          '{
-            repository: $repository,
-            branch: $branch,
-            commit: $commit,
-            scan_type: $scan_type,
-            languages: $languages,
-            total_files: ($total_files | tonumber),
-            total_findings: ($total_findings | tonumber),
-            workflow_run: $workflow_run,
-            sarif_data: $sarif_data[0]
-          }' > feed_data.json
-
-        # Clean up temp file
-        rm -f sarif_temp.json
-
-        echo "📊 Prepared security scan data for feed update"
+        echo "📊 Prepared SARIF data for Augur feed"
         echo ""
-        echo "🔍 Event Data Being Sent to Augur:"
-        echo "=================================="
+        echo "🔍 SARIF Data Being Sent:"
+        echo "========================="
         echo "Event Type: security_scan_completed"
         echo "Source: github-security-scan"
+        echo "Data Size: $(wc -c < feed_data.json) bytes"
         echo ""
-        echo "📋 Feed Data Preview:"
-        jq . feed_data.json 2>/dev/null || cat feed_data.json
-        echo ""
-        echo "📏 Data Size: $(wc -c < feed_data.json) bytes"
+        echo "📋 SARIF Preview (first 10 lines):"
+        head -10 feed_data.json
+        echo "..."
 
         # Set outputs
         echo "results_count=$TOTAL_FINDINGS" >> $GITHUB_OUTPUT
