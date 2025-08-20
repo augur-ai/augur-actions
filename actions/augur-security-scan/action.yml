@@ -290,6 +290,45 @@ runs:
           echo "✅ Security scan completed successfully!"
         fi
 
+    - name: Validate Feed Data
+      if: inputs.api_url != '' && inputs.api_key != '' && inputs.feed_id != ''
+      shell: bash
+      run: |
+        echo "🔍 Validating feed data before sending..."
+        
+        # Check if feed_data.json exists and is valid JSON
+        if [[ -f "feed_data.json" ]]; then
+          echo "✅ Feed data file exists"
+          
+          # Test JSON validity
+          if jq empty feed_data.json 2>/dev/null; then
+            echo "✅ Feed data is valid JSON"
+            
+            # Check if it's valid SARIF (has required fields)
+            if jq -e '.version and .runs' feed_data.json >/dev/null 2>&1; then
+              echo "✅ Feed data appears to be valid SARIF"
+            else
+              echo "⚠️ Feed data doesn't look like standard SARIF (missing version or runs)"
+            fi
+            
+            # Show data size
+            DATA_SIZE=$(wc -c < feed_data.json)
+            echo "📏 Feed data size: $DATA_SIZE bytes"
+            
+            # Show first few lines for debugging
+            echo "🔍 First 3 lines of feed data:"
+            head -3 feed_data.json
+            
+          else
+            echo "❌ Feed data is not valid JSON!"
+            echo "Raw content (first 200 chars):"
+            head -c 200 feed_data.json
+          fi
+        else
+          echo "❌ Feed data file not found!"
+        fi
+        echo ""
+
     - name: Send Augur Feed Update
       id: feed-update
       if: inputs.api_url != '' && inputs.api_key != '' && inputs.feed_id != ''
@@ -312,16 +351,33 @@ runs:
         if [[ "${{ inputs.api_url }}" != "" && "${{ inputs.api_key }}" != "" && "${{ inputs.feed_id }}" != "" ]]; then
           echo "🎯 Target: ${{ inputs.api_url }}/api/v1/webhook/feed/events/${{ inputs.feed_id }}"
           echo "📦 Event Type: security_scan_completed"
-          echo "🔑 API Key: [CONFIGURED]"
-          echo "📊 Status: ${{ steps.feed-update.outputs.success }}"
-          echo "📋 Response: ${{ steps.feed-update.outputs.status_code }}"
+          echo "🔑 API Key: [CONFIGURED - ${#{{ inputs.api_key }}} chars]"
+          echo "📊 Feed Update Step Status: ${{ steps.feed-update.outcome }}"
+          echo "📋 Feed Update Success: ${{ steps.feed-update.outputs.success }}"
+          echo "🌐 Status Code: ${{ steps.feed-update.outputs.status_code }}"
+          echo "📝 Response Body: ${{ steps.feed-update.outputs.response_body }}"
+          echo ""
+          echo "🔍 Debug Info:"
+          echo "- API URL length: ${#{{ inputs.api_url }}} chars"
+          echo "- Feed ID length: ${#{{ inputs.feed_id }}} chars"
+          echo "- Data size: $(wc -c < feed_data.json 2>/dev/null || echo 'unknown') bytes"
+          echo ""
           if [[ "${{ steps.feed-update.outputs.success }}" == "true" ]]; then
             echo "✅ Event successfully delivered to Augur!"
           else
-            echo "❌ Event delivery failed - check API credentials and URL"
+            echo "❌ Event delivery failed"
+            echo "   Check the details above for the specific error"
+            echo "   Common issues:"
+            echo "   - Invalid API key or URL"
+            echo "   - Feed ID doesn't exist"
+            echo "   - Network connectivity issues"
+            echo "   - Data payload too large or malformed"
           fi
         else
           echo "⏭️  Augur integration not configured (skipped)"
-          echo "   To enable: set api_url, api_key, and feed_id inputs"
+          echo "   Missing inputs:"
+          [[ -z "${{ inputs.api_url }}" ]] && echo "   - api_url"
+          [[ -z "${{ inputs.api_key }}" ]] && echo "   - api_key" 
+          [[ -z "${{ inputs.feed_id }}" ]] && echo "   - feed_id"
         fi
         echo ""
