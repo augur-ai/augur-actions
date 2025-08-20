@@ -78,6 +78,36 @@ jobs:
       - uses: augur-ai/augur-actions/actions/augur-security-scan@main
 
 # ==========================================
+# EXAMPLE 6: Debug Event Data
+# ==========================================
+name: Security Scan with Event Debugging
+on: [push]
+
+jobs:
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Run Security Scan
+        id: scan
+        uses: augur-ai/augur-actions/actions/augur-security-scan@main
+        with:
+          api_url: ${{ secrets.AUGUR_API_URL }}
+          api_key: ${{ secrets.AUGUR_API_KEY }}
+          feed_id: ${{ secrets.AUGUR_FEED_ID }}
+      
+      - name: Show Event Data
+        run: |
+          echo "🔍 Scan Results:"
+          echo "Languages: ${{ steps.scan.outputs.languages_detected }}"
+          echo "Findings: ${{ steps.scan.outputs.results_count }}"
+          echo "Feed Status: ${{ steps.scan.outputs.feed_status }}"
+          echo ""
+          echo "📦 Event Data Sent:"
+          echo '${{ steps.scan.outputs.feed_data }}' | jq .
+
+# ==========================================
 # That's it! Pick any example above.
 # No complex configurations needed! 🚀
 # ==========================================

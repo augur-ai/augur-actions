@@ -117,6 +117,51 @@ jobs:
 
 **Uses the `augur-feed-update` action internally for reliable delivery.**
 
+## 🔍 Viewing Event Data
+
+**To see what event data is being sent to Augur:**
+
+1. **Check the workflow logs** - the action displays the full event payload:
+   ```
+   🔍 Event Data Being Sent to Augur:
+   ==================================
+   Event Type: security_scan_completed
+   Source: github-security-scan
+   
+   📋 Feed Data Preview:
+   {
+     "repository": "owner/repo",
+     "branch": "main",
+     "commit": "abc123",
+     "scan_type": "codeql",
+     "languages": "javascript,python",
+     "total_files": 150,
+     "total_findings": 3,
+     "workflow_run": "https://github.com/...",
+     "sarif_data": { ... }
+   }
+   ```
+
+2. **Check delivery status** - see if the event was successfully sent:
+   ```
+   📤 Augur Event Delivery Summary:
+   ===============================
+   🎯 Target: https://api.augur.ai/api/v1/webhook/feed/events/feed123
+   📦 Event Type: security_scan_completed
+   🔑 API Key: [CONFIGURED]
+   📊 Status: true
+   📋 Response: 200
+   ✅ Event successfully delivered to Augur!
+   ```
+
+3. **Access via outputs** - use the event data in subsequent workflow steps:
+   ```yaml
+   - name: Show Event Data
+     run: |
+       echo "Event data: ${{ steps.scan.outputs.feed_data }}"
+       echo "Delivery status: ${{ steps.scan.outputs.feed_status }}"
+   ```
+
 ## 🔍 What Gets Scanned
 
 **CodeQL Analysis:**

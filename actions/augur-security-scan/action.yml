@@ -211,8 +211,16 @@ runs:
         rm -f sarif_temp.json
 
         echo "📊 Prepared security scan data for feed update"
-        echo "🔍 Feed data preview:"
-        head -5 feed_data.json
+        echo ""
+        echo "🔍 Event Data Being Sent to Augur:"
+        echo "=================================="
+        echo "Event Type: security_scan_completed"
+        echo "Source: github-security-scan"
+        echo ""
+        echo "📋 Feed Data Preview:"
+        jq . feed_data.json 2>/dev/null || cat feed_data.json
+        echo ""
+        echo "📏 Data Size: $(wc -c < feed_data.json) bytes"
 
         # Set outputs
         echo "results_count=$TOTAL_FINDINGS" >> $GITHUB_OUTPUT
@@ -262,3 +270,27 @@ runs:
         event_type: "security_scan_completed"
         source: "github-security-scan"
         data_variables: ${{ steps.scan.outputs.feed_data }}
+
+    - name: Display Event Delivery Status
+      if: always()
+      shell: bash
+      run: |
+        echo ""
+        echo "📤 Augur Event Delivery Summary:"
+        echo "==============================="
+        if [[ "${{ inputs.api_url }}" != "" && "${{ inputs.api_key }}" != "" && "${{ inputs.feed_id }}" != "" ]]; then
+          echo "🎯 Target: ${{ inputs.api_url }}/api/v1/webhook/feed/events/${{ inputs.feed_id }}"
+          echo "📦 Event Type: security_scan_completed"
+          echo "🔑 API Key: [CONFIGURED]"
+          echo "📊 Status: ${{ steps.feed-update.outputs.success }}"
+          echo "📋 Response: ${{ steps.feed-update.outputs.status_code }}"
+          if [[ "${{ steps.feed-update.outputs.success }}" == "true" ]]; then
+            echo "✅ Event successfully delivered to Augur!"
+          else
+            echo "❌ Event delivery failed - check API credentials and URL"
+          fi
+        else
+          echo "⏭️  Augur integration not configured (skipped)"
+          echo "   To enable: set api_url, api_key, and feed_id inputs"
+        fi
+        echo ""
