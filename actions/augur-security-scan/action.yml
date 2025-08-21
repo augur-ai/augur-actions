@@ -258,13 +258,9 @@ runs:
         echo "status=success" >> $GITHUB_OUTPUT
         echo "languages_detected=${LANGUAGES_FOUND:-none}" >> $GITHUB_OUTPUT
 
-        # Set feed_data output with proper escaping using random delimiter
-        delimiter=$(openssl rand -hex 8)
-        {
-          echo "feed_data<<${delimiter}"
-          cat feed_data.json
-          echo "${delimiter}"
-        } >> $GITHUB_OUTPUT
+        # Set feed_data output - read file content and escape it properly
+        FEED_DATA_CONTENT=$(cat feed_data.json | jq -c .)
+        echo "feed_data_content=$FEED_DATA_CONTENT" >> $GITHUB_OUTPUT
 
         # Final summary
         echo ""
@@ -340,7 +336,8 @@ runs:
         feed_id: ${{ inputs.feed_id }}
         event_type: "security_scan_completed"
         source: "github-security-scan"
-        data_variables: ${{ steps.scan.outputs.feed_data }}
+        data_variables: ${{ steps.scan.outputs.feed_data_content }}
+        raw_json_only: "true"
 
     - name: Display Event Delivery Status
       if: always()

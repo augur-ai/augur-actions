@@ -27,6 +27,10 @@ inputs:
   timestamp:
     description: "Custom timestamp (ISO 8601 format). If not provided, current timestamp will be used"
     required: false
+  raw_json_only:
+    description: "If true, send only the data_variables JSON without wrapping in event structure"
+    required: false
+    default: "false"
 
 outputs:
   status_code:
@@ -67,14 +71,25 @@ runs:
         if [[ -z "$TIMESTAMP" ]]; then
           TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%S.%3NZ")
         fi
-        # Write data_variables to a file
-        echo '${{ inputs.data_variables }}' > /tmp/data_vars.json
-        # Use jq to construct the payload
-        PAYLOAD=$(jq -n --arg type "${{ inputs.event_type }}" \
-                      --arg timestamp "$TIMESTAMP" \
-                      --arg source "${{ inputs.source }}" \
-                      --slurpfile data /tmp/data_vars.json \
-                      '{type: $type, timestamp: $timestamp, source: $source, data: $data[0]}')
+        # Check if we should send raw JSON only
+        if [[ "${{ inputs.raw_json_only }}" == "true" ]]; then
+          echo "📤 Sending raw JSON data only (no event wrapper)"
+          # Send data_variables directly as the payload
+          echo '${{ inputs.data_variables }}' > /tmp/payload.json
+          PAYLOAD=$(cat /tmp/payload.json)
+        else
+          echo "📤 Sending event with wrapper structure"
+          # Write data_variables to a file
+          echo '${{ inputs.data_variables }}' > /tmp/data_vars.json
+          # Use jq to construct the payload with event wrapper
+          PAYLOAD=$(jq -n --arg type "${{ inputs.event_type }}" \
+                        --arg timestamp "$TIMESTAMP" \
+                        --arg source "${{ inputs.source }}" \
+                        --slurpfile data /tmp/data_vars.json \
+                        '{type: $type, timestamp: $timestamp, source: $source, data: $data[0]}')
+          # Write payload to file to avoid URL encoding issues
+          echo "$PAYLOAD" > /tmp/payload.json
+        fi
         # Validate the generated JSON
         if ! echo "$PAYLOAD" | jq empty 2>/dev/null; then
           echo "❌ Failed to generate valid JSON payload"

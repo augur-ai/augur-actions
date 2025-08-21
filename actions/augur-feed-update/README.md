@@ -82,15 +82,16 @@ jobs:
 
 ### Input Parameters
 
-| Parameter        | Required | Default           | Description                             |
-| ---------------- | -------- | ----------------- | --------------------------------------- |
-| `api_url`        | ✅ Yes   | -                 | Base URL for the Augur API              |
-| `api_key`        | ✅ Yes   | -                 | API key for authentication              |
-| `feed_id`        | ✅ Yes   | -                 | Feed ID for the webhook endpoint        |
-| `event_type`     | ✅ Yes   | `"TEST"`          | Type of event being sent                |
-| `source`         | ✅ Yes   | `"github-action"` | Source identifier for the event         |
-| `data_variables` | ❌ No    | `"{}"`            | JSON object with dynamic data variables |
-| `timestamp`      | ❌ No    | Current time      | Custom timestamp (ISO 8601 format)      |
+| Parameter        | Required | Default           | Description                                    |
+| ---------------- | -------- | ----------------- | ---------------------------------------------- |
+| `api_url`        | ✅ Yes   | -                 | Base URL for the Augur API                     |
+| `api_key`        | ✅ Yes   | -                 | API key for authentication                     |
+| `feed_id`        | ✅ Yes   | -                 | Feed ID for the webhook endpoint               |
+| `event_type`     | ✅ Yes   | `"TEST"`          | Type of event being sent                       |
+| `source`         | ✅ Yes   | `"github-action"` | Source identifier for the event                |
+| `data_variables` | ❌ No    | `"{}"`            | JSON object with dynamic data variables        |
+| `timestamp`      | ❌ No    | Current time      | Custom timestamp (ISO 8601 format)             |
+| `raw_json_only`  | ❌ No    | `"false"`         | Send only data_variables without event wrapper |
 
 ### Output Parameters
 
@@ -156,6 +157,33 @@ jobs:
       }
 ```
 
+### 4. Raw JSON Data (No Event Wrapper)
+
+```yaml
+- name: Send raw SARIF data
+  uses: augur-ai/augur-actions/actions/augur-feed-update@main
+  with:
+    api_url: ${{ secrets.API_URL }}
+    api_key: ${{ secrets.API_KEY }}
+    feed_id: ${{ secrets.FEED_ID }}
+    event_type: "security_scan" # Not used when raw_json_only=true
+    source: "github-security" # Not used when raw_json_only=true
+    data_variables: |
+      {
+        "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+        "version": "2.1.0",
+        "runs": [
+          {
+            "tool": {"driver": {"name": "CodeQL"}},
+            "results": []
+          }
+        ]
+      }
+    raw_json_only: "true"
+```
+
+**Note:** When `raw_json_only: "true"`, the `event_type` and `source` parameters are ignored, and only the `data_variables` JSON is sent as the request body.
+
 ### 4. Custom Timestamp
 
 ```yaml
@@ -169,6 +197,49 @@ jobs:
     timestamp: "2025-01-15T10:30:00.000Z"
     data_variables: '{"custom_field": "custom_value"}'
 ```
+
+## 📊 Data Modes
+
+The action supports two different modes for sending data:
+
+### 1. Event Mode (Default: `raw_json_only: false`)
+
+When `raw_json_only` is `false` (default), the action wraps your data in an event structure:
+
+```json
+{
+  "type": "DEPLOYMENT",
+  "timestamp": "2025-01-15T10:30:00.000Z",
+  "source": "production-deploy",
+  "data": {
+    "environment": "production",
+    "version": "1.2.3"
+  }
+}
+```
+
+**Use this mode when:**
+
+- You want structured event tracking
+- You need metadata like timestamps and source information
+- You're building event-driven workflows
+
+### 2. Raw JSON Mode (`raw_json_only: true`)
+
+When `raw_json_only` is `true`, the action sends only your `data_variables` JSON directly:
+
+```json
+{
+  "environment": "production",
+  "version": "1.2.3"
+}
+```
+
+**Use this mode when:**
+
+- You need to send data in a specific format (like SARIF)
+- You're integrating with systems that expect raw JSON
+- You want to avoid the event wrapper structure
 
 ## 🔄 Workflow Examples
 
