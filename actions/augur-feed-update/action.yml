@@ -21,9 +21,13 @@ inputs:
     required: true
     default: "github-action"
   data_variables:
-    description: "JSON object containing dynamic data variables to include in the request"
+    description: "JSON object containing dynamic data variables to include in the request, or path to JSON file when data_from_file is true"
     required: false
     default: "{}"
+  data_from_file:
+    description: "If true, data_variables should contain a file path instead of JSON content"
+    required: false
+    default: "false"
   timestamp:
     description: "Custom timestamp (ISO 8601 format). If not provided, current timestamp will be used"
     required: false
