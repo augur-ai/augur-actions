@@ -1,5 +1,10 @@
 name: Augur Code-Gen Claude Trigger
 
+inputs:
+  anthropic_api_key:
+    description: "Anthropic API key for Claude Code Agent"
+    required: true
+
 runs:
   using: "composite"
   steps:
@@ -41,7 +46,7 @@ runs:
           }
         max_turns: "100"
         system_prompt: "You are a senior software engineer. Focus on writing clean, maintainable, and well-documented code. Always follow the project's existing patterns and conventions."
-        anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+        anthropic_api_key: ${{ inputs.anthropic_api_key }}
 
     - name: Check for changes
       id: check_changes
