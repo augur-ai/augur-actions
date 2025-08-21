@@ -329,6 +329,10 @@ runs:
       id: feed-update
       if: inputs.api_url != '' && inputs.api_key != '' && inputs.feed_id != ''
       shell: bash
+      env:
+        API_URL: ${{ inputs.api_url }}
+        API_KEY: ${{ inputs.api_key }}
+        FEED_ID: ${{ inputs.feed_id }}
       run: |
         # Read the SARIF data from file and send it to Augur
         if [[ -f "feed_data.json" ]]; then
@@ -338,16 +342,15 @@ runs:
           FILE_SIZE=$(wc -c < feed_data.json)
           echo "📏 SARIF file size: $FILE_SIZE bytes"
           
-          # Send the data using curl directly to avoid size limits
-          API_URL="${{ inputs.api_url }}/api/v1/webhook/feed/events/${{ inputs.feed_id }}"
-          echo "🌐 Sending to: $API_URL"
+          echo "🌐 Sending to: $API_URL/api/v1/webhook/feed/events/$FEED_ID"
+          echo "🔑 API Key: [CONFIGURED - ${#API_KEY} chars]"
           
           # Read the SARIF data and send it as JSON in the request body
           SARIF_CONTENT=$(cat feed_data.json)
           RESPONSE=$(curl -s -w "\n%{http_code}" \
-            --location "$API_URL" \
+            --location "$API_URL/api/v1/webhook/feed/events/$FEED_ID" \
             --header "Content-Type: application/json" \
-            --header "x-api-key: ${{ inputs.api_key }}" \
+            --header "x-api-key: $API_KEY" \
             --data "$SARIF_CONTENT" \
             --max-time 30 \
             --retry 3 \
