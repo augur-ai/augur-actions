@@ -111,9 +111,12 @@ runs:
       shell: bash
       run: |
         if [[ "${{ steps.extract_summary.outputs.has_custom_summary }}" == "true" ]]; then
-          echo "custom_summary<<EOF" >> $GITHUB_OUTPUT
-          echo "${{ steps.extract_summary.outputs.custom_summary_encoded }}" | base64 -d >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          # Decode directly to output without delimiters
+          echo "${{ steps.extract_summary.outputs.custom_summary_encoded }}" | base64 -d > temp_summary.txt
+          # Replace newlines with literal \n for single-line storage
+          SUMMARY_CONTENT=$(cat temp_summary.txt | sed ':a;N;$!ba;s/\n/\\n/g')
+          echo "custom_summary=${SUMMARY_CONTENT}" >> $GITHUB_OUTPUT
+          rm -f temp_summary.txt
         else
           echo "custom_summary=" >> $GITHUB_OUTPUT
         fi
@@ -125,7 +128,7 @@ runs:
         commit-message: "AI-generated code changes by Claude Code"
         title: "${{ steps.extract_summary.outputs.custom_title }}"
         body: |
-          ${{ steps.decode_summary.outputs.custom_summary }}
+          ${{ fromJSON(format('"{0}"', steps.decode_summary.outputs.custom_summary)) }}
 
           > 🤖 **This PR was automatically created by Augur with Claude Code Agent.** Please review the changes carefully before merging.
           > [Workflow Run](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
