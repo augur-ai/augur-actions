@@ -37,7 +37,7 @@ runs:
       uses: anthropics/claude-code-base-action@beta
       with:
         prompt: "${{ steps.extract_prompt.outputs.prompt }}"
-        allowed_tools: "Bash(git:*),View,GlobTool,GrepTool,BatchTool,Write"
+        allowed_tools: "Bash(*),View,GlobTool,GrepTool,BatchTool,Write"
         settings: |
           {
             "permissions": {
