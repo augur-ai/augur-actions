@@ -258,11 +258,12 @@ runs:
         echo "status=success" >> $GITHUB_OUTPUT
         echo "languages_detected=${LANGUAGES_FOUND:-none}" >> $GITHUB_OUTPUT
 
-        # Set feed_data output with proper escaping
+        # Set feed_data output with proper escaping using random delimiter
+        delimiter=$(openssl rand -hex 8)
         {
-          echo 'feed_data<<EOF'
+          echo "feed_data<<${delimiter}"
           cat feed_data.json
-          echo 'EOF'
+          echo "${delimiter}"
         } >> $GITHUB_OUTPUT
 
         # Final summary
