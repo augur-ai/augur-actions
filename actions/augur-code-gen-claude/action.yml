@@ -61,10 +61,10 @@ runs:
           4. Write/modify files as needed without asking for permission
           5. Test your changes when possible
           6. Commit your changes with clear, descriptive messages
-          7. Create a summary file 'pr_summary.md' with:
-             - Brief title describing what you accomplished
-             - List of files changed and why
-             - Any important notes or considerations for reviewers
+          7. IMPORTANT: Create a file named 'pr_summary.md' with:
+             - First line: # Brief title (e.g., "# Updated component to version 1.2.3 with enhancements")
+             - Remaining lines: Detailed summary of changes, files modified, and verification steps
+             - This file will be used as the PR description, so make it informative for reviewers
           8. Clean up any temporary files (like output.txt) before finishing
 
           Focus on writing clean, maintainable, and well-documented code that follows the project's existing patterns and conventions.
