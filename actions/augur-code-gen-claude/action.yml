@@ -93,11 +93,11 @@ runs:
           PR_TITLE=$(head -n 1 pr_summary.md | sed 's/^# *//')
           echo "custom_title=🤖 ${PR_TITLE}" >> $GITHUB_OUTPUT
           
-          # Use the rest as additional body content
+          # Use static delimiter for multiline output
           {
-            echo 'custom_summary<<EOF'
+            echo "custom_summary<<EOF"
             tail -n +2 pr_summary.md
-            echo 'EOF'
+            echo "EOF"
           } >> $GITHUB_OUTPUT
         else
           echo "custom_title=🤖 AI Code Generation: ${{ steps.extract_prompt.outputs.prompt }}" >> $GITHUB_OUTPUT
