@@ -1,0 +1,23 @@
+# Minimal Code Generation Examples
+# Just copy & paste - that's it!
+
+# ==========================================
+# EXAMPLE 1: One Step Setup (Most Common)
+# Manual trigger with custom prompt
+# ==========================================
+name: Code Generation
+on:
+  repository_dispatch:
+    types: [claude-code-trigger]
+  workflow_dispatch:
+    inputs:
+      claude_prompt:
+        description: "Describe what you want Claude to build or fix"
+        required: true
+        type: string
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: augur-ai/augur-actions/actions/augur-code-gen-claude@main
