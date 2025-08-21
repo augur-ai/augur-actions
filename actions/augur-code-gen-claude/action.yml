@@ -93,20 +93,30 @@ runs:
           PR_TITLE=$(head -n 1 pr_summary.md | sed 's/^# *//')
           echo "custom_title=🤖 ${PR_TITLE}" >> $GITHUB_OUTPUT
           
-          # Use static delimiter for multiline output
-          {
-            echo "custom_summary<<EOF"
-            tail -n +2 pr_summary.md
-            echo "EOF"
-          } >> $GITHUB_OUTPUT
+          # Encode multiline content to avoid delimiter issues
+          SUMMARY_CONTENT=$(tail -n +2 pr_summary.md | base64 -w 0)
+          echo "custom_summary_encoded=${SUMMARY_CONTENT}" >> $GITHUB_OUTPUT
+          echo "has_custom_summary=true" >> $GITHUB_OUTPUT
         else
           echo "custom_title=🤖 AI Code Generation: ${{ steps.extract_prompt.outputs.prompt }}" >> $GITHUB_OUTPUT
-          echo "custom_summary=" >> $GITHUB_OUTPUT
+          echo "has_custom_summary=false" >> $GITHUB_OUTPUT
         fi
 
     - name: Clean up output.txt
       shell: bash
       run: rm -f output.txt
+
+    - name: Decode PR Summary
+      id: decode_summary
+      shell: bash
+      run: |
+        if [[ "${{ steps.extract_summary.outputs.has_custom_summary }}" == "true" ]]; then
+          echo "custom_summary<<EOF" >> $GITHUB_OUTPUT
+          echo "${{ steps.extract_summary.outputs.custom_summary_encoded }}" | base64 -d >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+        else
+          echo "custom_summary=" >> $GITHUB_OUTPUT
+        fi
 
     - name: Create Pull Request with Generated Code
       id: create_pr
@@ -115,7 +125,7 @@ runs:
         commit-message: "AI-generated code changes by Claude Code"
         title: "${{ steps.extract_summary.outputs.custom_title }}"
         body: |
-          ${{ steps.extract_summary.outputs.custom_summary }}
+          ${{ steps.decode_summary.outputs.custom_summary }}
 
           > 🤖 **This PR was automatically created by Augur with Claude Code Agent.** Please review the changes carefully before merging.
           > [Workflow Run](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
