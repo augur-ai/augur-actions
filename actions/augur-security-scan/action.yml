@@ -380,22 +380,26 @@ runs:
     - name: Display Event Delivery Status
       if: always()
       shell: bash
+      env:
+        API_URL: ${{ inputs.api_url }}
+        API_KEY: ${{ inputs.api_key }}
+        FEED_ID: ${{ inputs.feed_id }}
       run: |
         echo ""
         echo "📤 Augur Event Delivery Summary:"
         echo "==============================="
-        if [[ "${{ inputs.api_url }}" != "" && "${{ inputs.api_key }}" != "" && "${{ inputs.feed_id }}" != "" ]]; then
-          echo "🎯 Target: ${{ inputs.api_url }}/api/v1/webhook/feed/events/${{ inputs.feed_id }}"
+        if [[ "$API_URL" != "" && "$API_KEY" != "" && "$FEED_ID" != "" ]]; then
+          echo "🎯 Target: $API_URL/api/v1/webhook/feed/events/$FEED_ID"
           echo "📦 Event Type: security_scan_completed"
-          echo "🔑 API Key: [CONFIGURED - ${#{{ inputs.api_key }}} chars]"
+          echo "🔑 API Key: [CONFIGURED - ${#API_KEY} chars]"
           echo "📊 Feed Update Step Status: ${{ steps.feed-update.outcome }}"
           echo "📋 Feed Update Success: ${{ steps.feed-update.outputs.success }}"
           echo "🌐 Status Code: ${{ steps.feed-update.outputs.status_code }}"
           echo "📝 Response Body: ${{ steps.feed-update.outputs.response_body }}"
           echo ""
           echo "🔍 Debug Info:"
-          echo "- API URL length: ${#{{ inputs.api_url }}} chars"
-          echo "- Feed ID length: ${#{{ inputs.feed_id }}} chars"
+          echo "- API URL length: ${#API_URL} chars"
+          echo "- Feed ID length: ${#FEED_ID} chars"
           echo "- Data size: $(wc -c < feed_data.json 2>/dev/null || echo 'unknown') bytes"
           echo ""
           if [[ "${{ steps.feed-update.outputs.success }}" == "true" ]]; then
