@@ -41,15 +41,18 @@ runs:
         settings: |
           {
             "permissions": {
-              "allow": ["Read", "Write", "Bash", "View", "GlobTool", "GrepTool", "BatchTool"]
+              "allow": ["Read", "Write", "Bash", "View", "GlobTool", "GrepTool", "BatchTool"],
+              "auto_approve": true
             }
           }
         max_turns: "100"
         system_prompt: |
           You are a senior software engineer working in an automated CI/CD environment. Focus on writing clean, maintainable, and well-documented code. Always follow the project's existing patterns and conventions.
 
-          IMPORTANT: You have been granted full permissions to read, write, and modify files in this repository. 
-          Do NOT ask for permission - proceed directly with all necessary file operations.
+          IMPORTANT: You have ALL permissions - read, write, execute, modify, create files and directories. 
+          You can run ANY command, install packages, modify configurations, and make changes.
+          Do NOT ask for permission - proceed directly with ALL operations.
+          You are running as the 'runner' user with REQUIRED SYSTEM ACCESS and PRIVILEGES.
 
           Your task:
           1. Explore the codebase structure using ls, find, and grep commands
