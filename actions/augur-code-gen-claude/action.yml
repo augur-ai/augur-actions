@@ -61,6 +61,7 @@ runs:
           4. Write/modify files as needed without asking for permission
           5. Test your changes when possible
           6. Commit your changes with clear, descriptive messages
+          7. Clean up any temporary files (like output.txt) before finishing
 
           Focus on writing clean, maintainable, and well-documented code that follows the project's existing patterns and conventions.
 
