@@ -69,6 +69,8 @@ runs:
     - name: Prepare request data
       id: prepare-data
       shell: bash
+      env:
+        DATA_VARS: ${{ inputs.data_variables }}
       run: |
         # Generate timestamp if not provided
         TIMESTAMP="${{ inputs.timestamp }}"
@@ -78,13 +80,13 @@ runs:
         # Check if we should send raw JSON only
         if [[ "${{ inputs.raw_json_only }}" == "true" ]]; then
           echo "📤 Sending raw JSON data only (no event wrapper)"
-          # Send data_variables directly as the payload
-          echo '${{ inputs.data_variables }}' > /tmp/payload.json
+          # Write raw JSON safely from environment variable (avoids quote/paren issues)
+          printf '%s' "$DATA_VARS" > /tmp/payload.json
           PAYLOAD=$(cat /tmp/payload.json)
         else
           echo "📤 Sending event with wrapper structure"
-          # Write data_variables to a file
-          echo '${{ inputs.data_variables }}' > /tmp/data_vars.json
+          # Write data_variables to a file safely
+          printf '%s' "$DATA_VARS" > /tmp/data_vars.json
           # Use jq to construct the payload with event wrapper
           PAYLOAD=$(jq -n --arg type "${{ inputs.event_type }}" \
                         --arg timestamp "$TIMESTAMP" \
