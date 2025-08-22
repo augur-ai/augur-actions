@@ -327,7 +327,7 @@ runs:
 
     - name: Minimize SARIF for Transport
       if: inputs.api_url != '' && inputs.api_key != '' && inputs.feed_id != ''
-      uses: ./actions/augur-sarif-minimizer
+      uses: augur-ai/augur-actions/actions/augur-sarif-minimizer@main
       with:
         input_sarif: feed_data.json
         output_sarif: feed_data.min.json
@@ -351,7 +351,7 @@ runs:
     - name: Send Augur Feed Update
       id: feed-update
       if: inputs.api_url != '' && inputs.api_key != '' && inputs.feed_id != ''
-      uses: ./actions/augur-feed-update
+      uses: augur-ai/augur-actions/actions/augur-feed-update@main
       with:
         api_url: ${{ inputs.api_url }}
         api_key: ${{ inputs.api_key }}
