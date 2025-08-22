@@ -325,6 +325,14 @@ runs:
         fi
         echo ""
 
+    - name: Minimize SARIF for Transport
+      if: inputs.api_url != '' && inputs.api_key != '' && inputs.feed_id != ''
+      uses: ./actions/augur-sarif-minimizer
+      with:
+        input_sarif: feed_data.json
+        output_sarif: feed_data.min.json
+        keep_original: true
+
     - name: Read SARIF Data for Feed Update
       id: read-data
       if: inputs.api_url != '' && inputs.api_key != '' && inputs.feed_id != ''
@@ -339,14 +347,6 @@ runs:
           echo "❌ feed_data.min.json not found!"
           exit 1
         fi
-
-    - name: Minimize SARIF for Transport
-      if: inputs.api_url != '' && inputs.api_key != '' && inputs.feed_id != ''
-      uses: ./actions/augur-sarif-minimizer
-      with:
-        input_sarif: feed_data.json
-        output_sarif: feed_data.min.json
-        keep_original: true
 
     - name: Send Augur Feed Update
       id: feed-update
