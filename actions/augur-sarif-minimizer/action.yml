@@ -1,0 +1,134 @@
+name: "Augur SARIF Minimizer"
+description: "Converts full SARIF to minimal format for efficient transport"
+author: "augur-ai"
+
+inputs:
+  input_sarif:
+    description: "Path to input SARIF file (default: feed_data.json)"
+    required: false
+    default: "feed_data.json"
+  output_sarif:
+    description: "Path for output minimal SARIF file (default: minimal_sarif.json)"
+    required: false
+    default: "minimal_sarif.json"
+  keep_original:
+    description: "Keep original SARIF file (default: false)"
+    required: false
+    default: "false"
+
+outputs:
+  original_size:
+    description: "Size of original SARIF in bytes"
+    value: ${{ steps.minimize.outputs.original_size }}
+  minimized_size:
+    description: "Size of minimized SARIF in bytes"
+    value: ${{ steps.minimize.outputs.minimized_size }}
+  compression_ratio:
+    description: "Compression ratio percentage"
+    value: ${{ steps.minimize.outputs.compression_ratio }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install jq
+      shell: bash
+      run: |
+        sudo apt-get update -y
+        sudo apt-get install -y jq
+
+    - name: Minimize SARIF
+      id: minimize
+      shell: bash
+      run: |
+        INPUT_FILE="${{ inputs.input_sarif }}"
+        OUTPUT_FILE="${{ inputs.output_sarif }}"
+
+        if [[ ! -f "$INPUT_FILE" ]]; then
+          echo "❌ Input SARIF file not found: $INPUT_FILE"
+          exit 1
+        fi
+
+        echo "🗜️ Minimizing SARIF: $INPUT_FILE → $OUTPUT_FILE"
+
+        # Get original size
+        ORIGINAL_SIZE=$(wc -c < "$INPUT_FILE")
+        echo "📏 Original size: $ORIGINAL_SIZE bytes"
+
+        # Create ultra-minimal SARIF (schema intact, maximum compression)
+        jq '{
+          "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+          "version": "2.1.0",
+          "runs": [
+            {
+              "tool": {
+                "driver": {
+                  "name": "CodeQL",
+                  "rules": [
+                    .runs[0].results[] | {
+                      "id": .rule.id,
+                      "name": (.rule.name // .rule.id),
+                      "shortDescription": {
+                        "text": (.message.text // "Security vulnerability detected")
+                      },
+                      "helpUri": (.rule.helpUri // ""),
+                      "properties": {
+                        "tags": (.rule.properties.tags // []),
+                        "security-severity": (.rule.properties["security-severity"] // ""),
+                        "precision": (.rule.properties.precision // ""),
+                        "kind": (.rule.properties.kind // "")
+                      }
+                    }
+                  ] | unique_by(.id)
+                }
+              },
+              "results": [
+                .runs[0].results[] | {
+                  "ruleId": .rule.id,
+                  "level": (.level // "warning"),
+                  "message": {
+                    "text": (.message.text // "Security vulnerability detected")
+                  },
+                  "locations": [
+                    {
+                      "physicalLocation": {
+                        "artifactLocation": {
+                          "uri": .locations[0].physicalLocation.artifactLocation.uri
+                        },
+                        "region": {
+                          "startLine": (.locations[0].physicalLocation.region.startLine // 1),
+                          "startColumn": (.locations[0].physicalLocation.region.startColumn // 1)
+                        }
+                      }
+                    }
+                  ],
+                  "properties": {
+                    "tags": (.properties.tags // []),
+                    "security-severity": (.properties["security-severity"] // ""),
+                    "precision": (.properties.precision // ""),
+                    "kind": (.properties.kind // "")
+                  }
+                }
+              ]
+            }
+          ]
+        }' "$INPUT_FILE" > "$OUTPUT_FILE"
+
+        # Get minimized size
+        MINIMIZED_SIZE=$(wc -c < "$OUTPUT_FILE")
+        COMPRESSION_RATIO=$((100 - (MINIMIZED_SIZE * 100 / ORIGINAL_SIZE)))
+
+        echo "📏 Minimized size: $MINIMIZED_SIZE bytes"
+        echo "🗜️ Compression ratio: ${COMPRESSION_RATIO}%"
+
+        # Set outputs
+        echo "original_size=$ORIGINAL_SIZE" >> $GITHUB_OUTPUT
+        echo "minimized_size=$MINIMIZED_SIZE" >> $GITHUB_OUTPUT
+        echo "compression_ratio=$COMPRESSION_RATIO" >> $GITHUB_OUTPUT
+
+        # Clean up original if requested
+        if [[ "${{ inputs.keep_original }}" == "false" ]]; then
+          echo "🗑️ Removing original SARIF file"
+          rm "$INPUT_FILE"
+        fi
+
+        echo "✅ SARIF minimization complete!"

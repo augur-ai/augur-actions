@@ -325,60 +325,40 @@ runs:
         fi
         echo ""
 
+    - name: Read SARIF Data for Feed Update
+      id: read-data
+      if: inputs.api_url != '' && inputs.api_key != '' && inputs.feed_id != ''
+      shell: bash
+      run: |
+        if [[ -f "feed_data.min.json" ]]; then
+          echo "📖 Reading minimized SARIF data for feed update..."
+          SARIF_CONTENT=$(cat feed_data.min.json)
+          echo "sarif_content=$SARIF_CONTENT" >> $GITHUB_OUTPUT
+          echo "✅ SARIF data prepared for feed update"
+        else
+          echo "❌ feed_data.min.json not found!"
+          exit 1
+        fi
+
+    - name: Minimize SARIF for Transport
+      if: inputs.api_url != '' && inputs.api_key != '' && inputs.feed_id != ''
+      uses: ./actions/augur-sarif-minimizer
+      with:
+        input_sarif: feed_data.json
+        output_sarif: feed_data.min.json
+        keep_original: true
+
     - name: Send Augur Feed Update
       id: feed-update
       if: inputs.api_url != '' && inputs.api_key != '' && inputs.feed_id != ''
-      shell: bash
-      env:
-        API_URL: ${{ inputs.api_url }}
-        API_KEY: ${{ inputs.api_key }}
-        FEED_ID: ${{ inputs.feed_id }}
-      run: |
-        # Read the SARIF data from file and send it to Augur
-        if [[ -f "feed_data.json" ]]; then
-          echo "📤 Reading SARIF data from feed_data.json..."
-          
-          # Check file size
-          FILE_SIZE=$(wc -c < feed_data.json)
-          echo "📏 SARIF file size: $FILE_SIZE bytes"
-          
-          echo "🌐 Sending to: $API_URL/api/v1/webhook/feed/events/$FEED_ID"
-          echo "🔑 API Key: [CONFIGURED - ${#API_KEY} chars]"
-          
-          # Read the SARIF data and send it as JSON in the request body
-          SARIF_CONTENT=$(cat feed_data.json)
-          RESPONSE=$(curl -s -w "\n%{http_code}" \
-            --location "$API_URL/api/v1/webhook/feed/events/$FEED_ID" \
-            --header "Content-Type: application/json" \
-            --header "x-api-key: $API_KEY" \
-            --data "$SARIF_CONTENT" \
-            --max-time 30 \
-            --retry 3 \
-            --retry-delay 1 2>&1)
-          
-          # Extract status code and response body
-          STATUS_CODE=$(echo "$RESPONSE" | tail -n1)
-          RESPONSE_BODY=$(echo "$RESPONSE" | sed '$d')
-          
-          echo "📥 Response Status: $STATUS_CODE"
-          echo "📝 Response Body: $RESPONSE_BODY"
-          
-          # Set outputs for the status display step
-          echo "success=$([[ "$STATUS_CODE" -ge 200 && "$STATUS_CODE" -lt 300 ]] && echo "true" || echo "false")" >> $GITHUB_OUTPUT
-          echo "status_code=$STATUS_CODE" >> $GITHUB_OUTPUT
-          echo "response_body=$RESPONSE_BODY" >> $GITHUB_OUTPUT
-          
-          if [[ "$STATUS_CODE" -ge 200 && "$STATUS_CODE" -lt 300 ]]; then
-            echo "✅ SARIF data sent successfully to Augur!"
-          else
-            echo "❌ Failed to send SARIF data (Status: $STATUS_CODE)"
-            echo "Response: $RESPONSE_BODY"
-            exit 1
-          fi
-        else
-          echo "❌ feed_data.json not found!"
-          exit 1
-        fi
+      uses: ./actions/augur-feed-update
+      with:
+        api_url: ${{ inputs.api_url }}
+        api_key: ${{ inputs.api_key }}
+        feed_id: ${{ inputs.feed_id }}
+        event_type: "security_scan_completed"
+        event_data: ${{ toJSON(fromJSON(steps.read-data.outputs.sarif_content)) }}
+        raw_data_mode: true
 
     - name: Display Event Delivery Status
       if: always()
@@ -399,11 +379,13 @@ runs:
           echo "📋 Feed Update Success: ${{ steps.feed-update.outputs.success }}"
           echo "🌐 Status Code: ${{ steps.feed-update.outputs.status_code }}"
           echo "📝 Response Body: ${{ steps.feed-update.outputs.response_body }}"
+          echo "📦 Event ID: ${{ steps.feed-update.outputs.event_id }}"
           echo ""
           echo "🔍 Debug Info:"
           echo "- API URL length: ${#API_URL} chars"
           echo "- Feed ID length: ${#FEED_ID} chars"
-          echo "- Data size: $(wc -c < feed_data.json 2>/dev/null || echo 'unknown') bytes"
+          echo "- Original SARIF size: $(wc -c < feed_data.json 2>/dev/null || echo 'unknown') bytes"
+          echo "- Minimized SARIF size: $(wc -c < feed_data.min.json 2>/dev/null || echo 'unknown') bytes"
           echo ""
           if [[ "${{ steps.feed-update.outputs.success }}" == "true" ]]; then
             echo "✅ Event successfully delivered to Augur!"

@@ -1,0 +1,60 @@
+name: Test Direct SARIF Flow
+on:
+  workflow_dispatch:
+
+jobs:
+  test-direct-flow:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install jq
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y jq
+
+      - name: Minimize SARIF
+        uses: ./actions/augur-sarif-minimizer
+        with:
+          input_sarif: event.json
+          output_sarif: event.min.json
+          keep_original: true
+
+      - name: Send to Local API
+        run: |
+          echo "📤 Sending minimized SARIF to localhost:8000..."
+
+          if [[ -f "event.min.json" ]]; then
+            echo "✅ event.min.json exists"
+            FILE_SIZE=$(wc -c < event.min.json)
+            echo "📏 Minimized file size: $FILE_SIZE bytes"
+            
+            echo "🌐 Sending to: http://localhost:8000/api/v1/webhook/feed/events/abcdefgh"
+            
+            RESPONSE=$(curl -s -w "\n%{http_code}" \
+              --location 'http://localhost:8000/api/v1/webhook/feed/events/abcdefgh' \
+              --header 'Content-Type: application/json' \
+              --header 'X-GitHub-Hook-ID: abcdefgh' \
+              --data '@event.min.json' \
+              --max-time 30 \
+              --retry 3 \
+              --retry-delay 1 2>&1)
+
+            STATUS_CODE=$(echo "$RESPONSE" | tail -n1)
+            RESPONSE_BODY=$(echo "$RESPONSE" | sed '$d')
+
+            echo "📥 Response Status: $STATUS_CODE"
+            echo "📝 Response Body: $RESPONSE_BODY"
+
+            if [[ "$STATUS_CODE" -ge 200 && "$STATUS_CODE" -lt 300 ]]; then
+              echo "✅ SARIF sent successfully!"
+            else
+              echo "❌ Failed to send SARIF (Status: $STATUS_CODE)"
+              echo "Response: $RESPONSE_BODY"
+              exit 1
+            fi
+          else
+            echo "❌ event.min.json not found!"
+            exit 1
+          fi

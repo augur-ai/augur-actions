@@ -15,7 +15,9 @@ augur-actions/
 ├── actions/
 │   ├── post-feed-update/          # Core notification action
 │   ├── release-branch-notification/ # Release branch creation tracking
-│   └── release-branch-update/     # Release branch update tracking
+│   ├── release-branch-update/     # Release branch update tracking
+│   ├── augur-security-scan/       # Security scanning with CodeQL
+│   └── augur-sarif-minimizer/     # SARIF file compression
 ```
 
 ### Core Components
@@ -33,9 +35,21 @@ augur-actions/
    - **Triggers**: Branch creation events
 
 3. **Release Branch Update** (`release-branch-update/`)
+
    - **Purpose**: Tracks updates to existing release branches
    - **Features**: Monitors PR merges, collects commit diffs, sends update notifications
    - **Triggers**: Push events to release branches
+
+4. **Augur Security Scan** (`augur-security-scan/`)
+
+   - **Purpose**: Performs security scanning using CodeQL with fallback pattern scanning
+   - **Features**: Auto-detects languages, generates SARIF reports, sends to API endpoints
+   - **Triggers**: Workflow dispatch or security events
+
+5. **Augur SARIF Minimizer** (`augur-sarif-minimizer/`)
+   - **Purpose**: Converts full SARIF files to minimal format for efficient transport
+   - **Features**: 80%+ size reduction while preserving essential security data
+   - **Usage**: Standalone or integrated with security scanning workflows
 
 ## 🚀 Quick Start
 

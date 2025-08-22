@@ -1,0 +1,230 @@
+name: Semgrep Security Scan
+
+on:
+  workflow_dispatch:
+
+jobs:
+  semgrep-scan:
+    runs-on: ubuntu-latest
+    env:
+      API_URL: "https://internal.getaugur.ai"
+      API_KEY: "c26e753f1308311d5852571614849c3a10f5d85fb0aa37b69c96539b4b55d982e933e9f642ea0df4f2af0d846bbd921b"
+      FEED_ID: "f62e7134-90db-4ce1-8b50-91cbe8a508dc"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install Semgrep
+        run: |
+          python -m pip install --upgrade pip
+          pip install semgrep
+
+      - name: Ensure jq is available
+        run: |
+          if ! command -v jq >/dev/null 2>&1; then
+            sudo apt-get update -y
+            sudo apt-get install -y jq
+          fi
+
+      - name: Run Semgrep (SARIF output)
+        run: |
+          mkdir -p sarif-results
+          # Auto-detect config; produce SARIF to sarif-results
+          semgrep ci --config auto --sarif --output sarif-results/semgrep.sarif || true
+          echo "✅ Semgrep completed (non-zero exit allowed to continue)"
+          ls -la sarif-results || true
+
+      - name: Process Results and Prepare Feed Data
+        id: scan
+        shell: bash
+        run: |
+          echo "🔒 Processing Semgrep Results..."
+
+          SARIF_FILES=$(find sarif-results -name "*.sarif" 2>/dev/null || echo "")
+
+          if [[ -z "$SARIF_FILES" ]]; then
+            echo "⚠️ No SARIF files found - creating empty SARIF"
+            jq -n '{
+              "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+              "version": "2.1.0",
+              "runs": [{
+                "tool": {"driver": {"name": "Semgrep"}},
+                "results": [],
+                "summary": {"note": "No SARIF data available"}
+              }]
+            }' > feed_data.json
+
+            TOTAL_FINDINGS=0
+            LANGUAGES_FOUND=""
+          else
+            echo "📄 Found SARIF files, processing..."
+            TOTAL_FINDINGS=0
+            LANGUAGES_FOUND=""
+
+            for SARIF_FILE in $SARIF_FILES; do
+              echo "Processing: $SARIF_FILE"
+              FILE_FINDINGS=$(jq '[.runs[].results // []] | add | length' "$SARIF_FILE" 2>/dev/null || echo "0")
+              TOTAL_FINDINGS=$((TOTAL_FINDINGS + FILE_FINDINGS))
+              LANG=$(jq -r '.runs[0].tool.driver.name // "unknown"' "$SARIF_FILE" 2>/dev/null || echo "unknown")
+              if [[ "$LANG" != "unknown" && "$LANG" != "null" ]]; then
+                [[ -n "$LANGUAGES_FOUND" ]] && LANGUAGES_FOUND="$LANGUAGES_FOUND,$LANG" || LANGUAGES_FOUND="$LANG"
+              fi
+              echo "  - Language: $LANG"
+              echo "  - Findings: $FILE_FINDINGS"
+            done
+
+            LANGUAGES_FOUND=$(echo "$LANGUAGES_FOUND" | tr ',' '\n' | sort -u | tr '\n' ',' | sed 's/,$//')
+
+            FIRST_SARIF=$(echo "$SARIF_FILES" | head -1)
+            if [[ -f "$FIRST_SARIF" ]]; then
+              SARIF_SIZE=$(wc -c < "$FIRST_SARIF" 2>/dev/null || echo "0")
+              if [[ "$SARIF_SIZE" -lt 5242880 ]]; then
+                echo "📄 Using full SARIF data (${SARIF_SIZE} bytes)"
+                cp "$FIRST_SARIF" feed_data.json
+              else
+                echo "⚠️ SARIF file too large (${SARIF_SIZE} bytes), creating summary"
+                jq --arg size "$SARIF_SIZE" '{
+                  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+                  "version": "2.1.0",
+                  "runs": [
+                    {
+                      "tool": (.runs[0].tool // {"driver": {"name": "Semgrep"}}),
+                      "results": (.runs[0].results[0:20] // []),
+                      "summary": {
+                        "total_results": ([.runs[].results // []] | add | length),
+                        "note": "SARIF truncated - showing first 20 results only",
+                        "original_size_bytes": ($size | tonumber)
+                      }
+                    }
+                  ]
+                }' "$FIRST_SARIF" > feed_data.json 2>/dev/null || {
+                  jq -n --arg size "$SARIF_SIZE" '{
+                    "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+                    "version": "2.1.0",
+                    "runs": [{
+                      "tool": {"driver": {"name": "Semgrep"}},
+                      "results": [],
+                      "summary": {
+                        "note": "SARIF file too large for processing",
+                        "original_size_bytes": ($size | tonumber)
+                      }
+                    }]
+                  }' > feed_data.json
+                }
+              fi
+            else
+              echo "⚠️ No SARIF file found, sending empty result"
+              jq -n '{
+                "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+                "version": "2.1.0",
+                "runs": [{
+                  "tool": {"driver": {"name": "Semgrep"}},
+                  "results": [],
+                  "summary": {"note": "No SARIF data available"}
+                }]
+              }' > feed_data.json
+            fi
+          fi
+
+          echo "📊 Prepared SARIF data for Augur feed"
+          echo "Data Size: $(wc -c < feed_data.json) bytes"
+          echo "🔍 SARIF Preview (first 10 lines):"
+          head -10 feed_data.json
+          echo "..."
+
+      - name: Validate Feed Data
+        shell: bash
+        run: |
+          echo "🔍 Validating feed data before sending..."
+          if [[ -f "feed_data.json" ]]; then
+            echo "✅ Feed data file exists"
+            if jq empty feed_data.json 2>/dev/null; then
+              echo "✅ Feed data is valid JSON"
+              if jq -e '.version and .runs' feed_data.json >/dev/null 2>&1; then
+                echo "✅ Feed data appears to be valid SARIF"
+              else
+                echo "⚠️ Feed data doesn't look like standard SARIF (missing version or runs)"
+              fi
+              DATA_SIZE=$(wc -c < feed_data.json)
+              echo "📏 Feed data size: $DATA_SIZE bytes"
+              echo "🔍 First 3 lines of feed data:"
+              head -3 feed_data.json
+            else
+              echo "❌ Feed data is not valid JSON!"
+              echo "Raw content (first 200 chars):"
+              head -c 200 feed_data.json
+              exit 1
+            fi
+          else
+            echo "❌ Feed data file not found!"
+            exit 1
+          fi
+          echo ""
+
+      - name: Send Augur Feed Update
+        id: feed-update
+        shell: bash
+        run: |
+          if [[ -f "feed_data.json" ]]; then
+            echo "📤 Reading SARIF data from feed_data.json..."
+            FILE_SIZE=$(wc -c < feed_data.json)
+            echo "📏 SARIF file size: $FILE_SIZE bytes"
+            echo "🌐 Sending to: $API_URL/api/v1/webhook/feed/events/$FEED_ID"
+            echo "🔑 API Key: [CONFIGURED - ${#API_KEY} chars]"
+
+            SARIF_CONTENT=$(cat feed_data.json)
+            RESPONSE=$(curl -s -w "\n%{http_code}" \
+              --location "$API_URL/api/v1/webhook/feed/events/$FEED_ID" \
+              --header "Content-Type: application/json" \
+              --header "x-api-key: $API_KEY" \
+              --data "$SARIF_CONTENT" \
+              --max-time 30 \
+              --retry 3 \
+              --retry-delay 1 2>&1)
+
+            STATUS_CODE=$(echo "$RESPONSE" | tail -n1)
+            RESPONSE_BODY=$(echo "$RESPONSE" | sed '$d')
+
+            echo "📥 Response Status: $STATUS_CODE"
+            echo "📝 Response Body: $RESPONSE_BODY"
+
+            echo "success=$([[ "$STATUS_CODE" -ge 200 && "$STATUS_CODE" -lt 300 ]] && echo "true" || echo "false")" >> $GITHUB_OUTPUT
+            echo "status_code=$STATUS_CODE" >> $GITHUB_OUTPUT
+            echo "response_body=$RESPONSE_BODY" >> $GITHUB_OUTPUT
+
+            if [[ "$STATUS_CODE" -ge 200 && "$STATUS_CODE" -lt 300 ]]; then
+              echo "✅ SARIF data sent successfully to Augur!"
+            else
+              echo "❌ Failed to send SARIF data (Status: $STATUS_CODE)"
+              echo "Response: $RESPONSE_BODY"
+              exit 1
+            fi
+          else
+            echo "❌ feed_data.json not found!"
+            exit 1
+          fi
+
+      - name: Display Event Delivery Status
+        if: always()
+        shell: bash
+        run: |
+          echo ""
+          echo "📤 Augur Event Delivery Summary:"
+          echo "==============================="
+          if [[ "$API_URL" != "" && "$API_KEY" != "" && "$FEED_ID" != "" ]]; then
+            echo "🎯 Target: $API_URL/api/v1/webhook/feed/events/$FEED_ID"
+            echo "📦 Event Type: security_scan_completed"
+            echo "🔑 API Key: [CONFIGURED - ${#API_KEY} chars]"
+            echo "📋 Feed Update Success: ${{ steps.feed-update.outputs.success }}"
+            echo "🌐 Status Code: ${{ steps.feed-update.outputs.status_code }}"
+            echo "📝 Response Body: ${{ steps.feed-update.outputs.response_body }}"
+            echo ""
+          else
+            echo "⏭️  Augur integration not configured (skipped)"
+          fi
+          echo ""
