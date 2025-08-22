@@ -44,15 +44,12 @@ runs:
         OUTPUT_FILE="${{ inputs.output_sarif }}"
 
         if [[ ! -f "$INPUT_FILE" ]]; then
-          echo "❌ Input SARIF file not found: $INPUT_FILE"
+          echo "Input SARIF file not found: $INPUT_FILE"
           exit 1
         fi
 
-        echo "🗜️ Minimizing SARIF: $INPUT_FILE → $OUTPUT_FILE"
-
         # Get original size
         ORIGINAL_SIZE=$(wc -c < "$INPUT_FILE")
-        echo "📏 Original size: $ORIGINAL_SIZE bytes"
 
         # Create ultra-minimal SARIF (schema intact, maximum compression)
         jq '{
@@ -115,10 +112,10 @@ runs:
 
         # Get minimized size
         MINIMIZED_SIZE=$(wc -c < "$OUTPUT_FILE")
-        COMPRESSION_RATIO=$((100 - (MINIMIZED_SIZE * 100 / ORIGINAL_SIZE)))
+        # Use POSIX-safe arithmetic (avoid nested parentheses)
+        COMPRESSION_RATIO=$((100 - MINIMIZED_SIZE * 100 / ORIGINAL_SIZE))
 
-        echo "📏 Minimized size: $MINIMIZED_SIZE bytes"
-        echo "🗜️ Compression ratio: ${COMPRESSION_RATIO}%"
+        # Optional: outputs expose sizes; silent logs by default
 
         # Set outputs
         echo "original_size=$ORIGINAL_SIZE" >> $GITHUB_OUTPUT
@@ -127,8 +124,5 @@ runs:
 
         # Clean up original if requested
         if [[ "${{ inputs.keep_original }}" == "false" ]]; then
-          echo "🗑️ Removing original SARIF file"
           rm "$INPUT_FILE"
         fi
-
-        echo "✅ SARIF minimization complete!"

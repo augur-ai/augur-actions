@@ -245,8 +245,7 @@ runs:
         echo ""
         echo "🔍 SARIF Data Being Sent:"
         echo "========================="
-        echo "Event Type: security_scan_completed"
-        echo "Source: github-security-scan"
+        echo "Mode: raw_json_only"
         echo "Data Size: $(wc -c < feed_data.json) bytes"
         echo ""
         echo "📋 SARIF Preview (first 10 lines):"
@@ -374,7 +373,7 @@ runs:
         echo "==============================="
         if [[ "$API_URL" != "" && "$API_KEY" != "" && "$FEED_ID" != "" ]]; then
           echo "🎯 Target: $API_URL/api/v1/webhook/feed/events/$FEED_ID"
-          echo "📦 Event Type: security_scan_completed"
+          echo "📦 Payload: raw JSON"
           echo "🔑 API Key: [CONFIGURED - ${#API_KEY} chars]"
           echo "📊 Feed Update Step Status: ${{ steps.feed-update.outcome }}"
           echo "📋 Feed Update Success: ${{ steps.feed-update.outputs.success }}"
