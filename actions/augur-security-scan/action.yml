@@ -340,7 +340,8 @@ runs:
       run: |
         if [[ -f "feed_data.min.json" ]]; then
           echo "📖 Reading minimized SARIF data for feed update..."
-          SARIF_CONTENT=$(cat feed_data.min.json)
+          # Compact JSON to a single line to safely write to GITHUB_OUTPUT
+          SARIF_CONTENT=$(jq -c '.' feed_data.min.json)
           echo "sarif_content=$SARIF_CONTENT" >> $GITHUB_OUTPUT
           echo "✅ SARIF data prepared for feed update"
         else
