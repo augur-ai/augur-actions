@@ -357,9 +357,9 @@ runs:
         api_url: ${{ inputs.api_url }}
         api_key: ${{ inputs.api_key }}
         feed_id: ${{ inputs.feed_id }}
-        event_type: "security_scan_completed"
-        event_data: ${{ toJSON(fromJSON(steps.read-data.outputs.sarif_content)) }}
-        raw_data_mode: true
+        # Send plain JSON (no wrapper)
+        data_variables: ${{ steps.read-data.outputs.sarif_content }}
+        raw_json_only: true
 
     - name: Display Event Delivery Status
       if: always()
