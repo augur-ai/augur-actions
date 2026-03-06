@@ -199,12 +199,12 @@ runs:
         echo ""
 
     # ─────────────────────────────────────────────
-    # Step 4: Write CI permissions settings
+    # Step 4: Write CI permissions settings + MCP config
     # ─────────────────────────────────────────────
     - name: Write CI permissions settings
       shell: python3 {0}
       run: |
-        import json
+        import json, os, pathlib
 
         settings = {
           "permissions": {
@@ -225,6 +225,25 @@ runs:
         print(f"CI settings written to {out}")
         print(json.dumps(settings, indent=2))
 
+        # Extract mcpServers from ~/.claude.json (written by gitx init) into a
+        # dedicated --mcp-config file.  claude -p does not auto-read ~/.claude.json
+        # in non-interactive pipe mode, so we must pass --mcp-config explicitly.
+        claude_json_path = pathlib.Path.home() / ".claude.json"
+        mcp_config = {"mcpServers": {}}
+        if claude_json_path.exists():
+            try:
+                data = json.loads(claude_json_path.read_text())
+                mcp_config["mcpServers"] = data.get("mcpServers", {})
+            except Exception as e:
+                print(f"Warning: could not parse ~/.claude.json: {e}")
+
+        mcp_out = "/tmp/gitx-mcp-config.json"
+        with open(mcp_out, "w") as f:
+            json.dump(mcp_config, f, indent=2)
+
+        print(f"\nMCP config written to {mcp_out}")
+        print(json.dumps(mcp_config, indent=2))
+
     # ─────────────────────────────────────────────
     # Step 4b: Install Claude Code CLI
     # ─────────────────────────────────────────────
@@ -240,10 +259,12 @@ runs:
 
     # ─────────────────────────────────────────────
     # Step 5: Run Claude via claude -p
-    #   MCPs come from ~/.claude.json (written by gitx init).
-    #   Permissions come from /tmp/gitx-ci-settings.json (Step 4).
+    #   --mcp-config   /tmp/gitx-mcp-config.json  (extracted from ~/.claude.json by Step 4)
+    #   --settings     /tmp/gitx-ci-settings.json  (permissions — Step 4)
     #   ANTHROPIC_BASE_URL routes all Claude API calls through the gitx
     #   gateway so tool events are relayed to the Live Log UI.
+    #   Note: claude -p does NOT auto-load ~/.claude.json in pipe mode;
+    #   --mcp-config must be passed explicitly for MCP tools to be available.
     # ─────────────────────────────────────────────
     - name: Run claude -p
       id: run-claude
@@ -272,6 +293,7 @@ runs:
         echo "=== Running claude -p (session: $SESSION_ID) ==="
         set -o pipefail
         claude -p "$(cat "$PROMPT_FILE")" \
+          --mcp-config /tmp/gitx-mcp-config.json \
           --settings /tmp/gitx-ci-settings.json \
           --session-id "$SESSION_ID" \
           --output-format text \
