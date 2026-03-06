@@ -55,7 +55,7 @@ jobs:
 | Output | Description |
 |--------|-------------|
 | `session_id` | gitx session ID for this run |
-| `ci_status` | `PASS`, `FAIL`, or `UNKNOWN` from the procedure's final report |
+| `run_status` | `PASS`, `FAIL`, or `UNKNOWN` from the procedure's final report |
 
 ## Passing parameters
 
@@ -78,7 +78,7 @@ jobs:
     procedure: my-procedure
 
 - name: Check result
-  if: steps.gitx.outputs.ci_status == 'FAIL'
+  if: steps.gitx.outputs.run_status == 'FAIL'
   run: echo "Procedure failed" && exit 1
 ```
 

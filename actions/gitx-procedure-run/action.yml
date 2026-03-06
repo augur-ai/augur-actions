@@ -52,9 +52,9 @@ outputs:
     description: 'gitx session ID for this procedure run'
     value: ${{ steps.run-procedure.outputs.session_id }}
 
-  ci_status:
-    description: 'PASS or FAIL from the final report task (if procedure emits ci_status)'
-    value: ${{ steps.run-claude.outputs.conclusion }}
+  run_status:
+    description: 'PASS or FAIL from the procedure final report'
+    value: ${{ steps.run-claude.outputs.run_status }}
 
 runs:
   using: 'composite'
@@ -277,11 +277,11 @@ runs:
 
         # Extract ci_status — match various forms Claude uses: "Overall: PASS", "**PASS**", "Status: PASS"
         if grep -qiE "(Overall|Status)[^a-zA-Z]*(PASS)|[*_]{0,2}PASS[*_]{0,2}" /tmp/gitx-claude.log 2>/dev/null; then
-          echo "conclusion=PASS" >> "$GITHUB_OUTPUT"
+          echo "run_status=PASS" >> "$GITHUB_OUTPUT"
         elif grep -qiE "(Overall|Status)[^a-zA-Z]*(FAIL)|[*_]{0,2}FAIL[*_]{0,2}" /tmp/gitx-claude.log 2>/dev/null; then
-          echo "conclusion=FAIL" >> "$GITHUB_OUTPUT"
+          echo "run_status=FAIL" >> "$GITHUB_OUTPUT"
         else
-          echo "conclusion=UNKNOWN" >> "$GITHUB_OUTPUT"
+          echo "run_status=UNKNOWN" >> "$GITHUB_OUTPUT"
         fi
 
         exit $EXIT
