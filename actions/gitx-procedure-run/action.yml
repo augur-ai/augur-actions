@@ -156,9 +156,9 @@ runs:
     - name: Build procedure exec prompt
       id: run-procedure
       shell: bash
-      working-directory: ${{ inputs.working_directory }}
       env:
         GITX_API_TOKEN: ${{ env.GITX_API_TOKEN }}
+        GITX_PROJECT_ROOT: ${{ github.workspace }}/${{ inputs.working_directory }}
       run: |
         set -euo pipefail
 
