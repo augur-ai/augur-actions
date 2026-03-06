@@ -1,0 +1,312 @@
+name: 'gitx Procedure Run'
+description: 'Run a gitx procedure using Claude Code as the execution engine'
+author: 'augur-ai'
+
+branding:
+  icon: 'cpu'
+  color: 'green'
+
+# Secrets are read from environment variables set at the workflow/repo level:
+#   ANTHROPIC_API_KEY  — Anthropic API key
+#   GITX_API_TOKEN     — gitx registry API token
+#   GITX_BACKEND_URL   — gitx backend URL (enables Live Log UI + event relay)
+#   GITX_ORG_ID        — Organization ID for task relay
+
+inputs:
+  procedure:
+    description: 'Procedure ID to run (e.g. todo-app-ci, gha-error-triage-and-fix)'
+    required: true
+
+  params:
+    description: |
+      Newline-separated key=value pairs passed as --param flags to gitx procedure exec.
+      Example:
+        repo_path=/home/runner/work/myapp/myapp
+        node_version=20
+    required: false
+    default: ''
+
+  gitx_version:
+    description: 'gitx version to install (e.g. v0.5.0). Defaults to latest.'
+    required: false
+    default: 'latest'
+
+  gitx_binary_path:
+    description: |
+      Path to a pre-built gitx binary. If set, skips the download step.
+      Useful for local act testing or air-gapped environments.
+    required: false
+    default: ''
+
+  model:
+    description: 'Claude model to use'
+    required: false
+    default: 'claude-sonnet-4-5'
+
+  max_turns:
+    description: 'Maximum number of agentic turns Claude can take. Leave empty for no limit.'
+    required: false
+    default: ''
+
+outputs:
+  session_id:
+    description: 'gitx session ID for this procedure run'
+    value: ${{ steps.run-procedure.outputs.session_id }}
+
+  ci_status:
+    description: 'PASS or FAIL from the final report task (if procedure emits ci_status)'
+    value: ${{ steps.run-claude.outputs.conclusion }}
+
+runs:
+  using: 'composite'
+  steps:
+    # ─────────────────────────────────────────────
+    # Step 1: Install gitx binary
+    # ─────────────────────────────────────────────
+    - name: Install gitx
+      shell: bash
+      env:
+        GITX_VERSION: ${{ inputs.gitx_version }}
+        GITX_BINARY_PATH: ${{ inputs.gitx_binary_path }}
+      run: |
+        set -euo pipefail
+
+        INSTALL_DIR="$HOME/.local/bin"
+        mkdir -p "$INSTALL_DIR"
+
+        if [ -n "$GITX_BINARY_PATH" ]; then
+          # Pre-built binary path provided (local act testing / air-gapped)
+          echo "Using pre-built gitx binary: $GITX_BINARY_PATH"
+          install -m 755 "$GITX_BINARY_PATH" "$INSTALL_DIR/gitx"
+        elif command -v brew &>/dev/null; then
+          # Homebrew available (macOS runners, Linux with brew)
+          echo "Installing gitx via Homebrew..."
+          brew install augur-ai/tap/gitx
+          BREW_GITX="$(brew --prefix)/bin/gitx"
+          ln -sf "$BREW_GITX" "$INSTALL_DIR/gitx"
+        else
+          # Fallback: download tarball from GitHub releases
+          OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
+          ARCH="$(uname -m)"
+          case "$ARCH" in
+            x86_64)  ARCH="amd64" ;;
+            aarch64|arm64) ARCH="arm64" ;;
+            *) echo "Unsupported architecture: $ARCH"; exit 1 ;;
+          esac
+          if [ "$GITX_VERSION" = "latest" ]; then
+            GITX_VERSION="$(curl -fsSL https://api.github.com/repos/augur-ai/augur-jobs/releases/latest \
+              | python3 -c "import sys,json; print(json.load(sys.stdin)['tag_name'])")"
+          fi
+          ASSET="gitx_${OS}_${ARCH}.tar.gz"
+          URL="https://github.com/augur-ai/augur-jobs/releases/download/${GITX_VERSION}/${ASSET}"
+          echo "Downloading gitx ${GITX_VERSION} (${OS}/${ARCH})..."
+          curl -fsSL "$URL" -o /tmp/gitx.tar.gz
+          tar -xzf /tmp/gitx.tar.gz -C /tmp
+          install -m 755 /tmp/gitx "$INSTALL_DIR/gitx"
+        fi
+
+        # Running gitx once extracts embedded MCP binaries to ~/.gitx/bin/
+        "$INSTALL_DIR/gitx" --version
+        echo "$INSTALL_DIR" >> "$GITHUB_PATH"
+        echo "gitx installed: $("$INSTALL_DIR/gitx" --version)"
+
+    # ─────────────────────────────────────────────
+    # Step 1b: Authenticate gitx
+    # ─────────────────────────────────────────────
+    - name: Authenticate gitx
+      shell: bash
+      env:
+        GITX_API_TOKEN: ${{ env.GITX_API_TOKEN }}
+        GITX_BACKEND_URL: ${{ env.GITX_BACKEND_URL }}
+      run: gitx auth login --backend "$GITX_BACKEND_URL"
+
+    # ─────────────────────────────────────────────
+    # Step 1c: Initialize gitx (extracts MCPs, writes Claude hooks)
+    # ─────────────────────────────────────────────
+    - name: Initialize gitx
+      shell: bash
+      run: gitx init --skip-index --no-browser --no-report --agents=claude
+
+    # ─────────────────────────────────────────────
+    # Step 2: Start gitx gateway (must be up before --print-prompt so session
+    #          registration succeeds and EventRelay can forward events)
+    # ─────────────────────────────────────────────
+    - name: Start gitx gateway
+      shell: bash
+      env:
+        GITX_BACKEND_URL: ${{ env.GITX_BACKEND_URL }}
+        GITX_API_TOKEN: ${{ env.GITX_API_TOKEN }}
+        GITX_ORG_ID: ${{ env.GITX_ORG_ID }}
+      run: |
+        if [ -n "$GITX_BACKEND_URL" ]; then
+          gitx gateway start --background --backend-url "$GITX_BACKEND_URL"
+          for i in $(seq 1 15); do
+            if curl -s -o /dev/null --connect-timeout 2 http://localhost:8788/_gittrace/session/bind 2>/dev/null; then
+              echo "Gateway ready on port 8788"; break
+            fi
+            echo "  waiting for gateway... $i/15"; sleep 2
+          done
+        else
+          echo "No GITX_BACKEND_URL set — skipping gateway start"
+        fi
+
+    # ─────────────────────────────────────────────
+    # Step 3: Build the exec prompt (no Claude yet)
+    #          Gateway must be running so session bind succeeds here.
+    # ─────────────────────────────────────────────
+    - name: Build procedure exec prompt
+      id: run-procedure
+      shell: bash
+      env:
+        GITX_BACKEND_URL: ${{ env.GITX_BACKEND_URL }}
+        GITX_API_TOKEN: ${{ env.GITX_API_TOKEN }}
+      run: |
+        set -euo pipefail
+
+        PROCEDURE="${{ inputs.procedure }}"
+        PARAMS_RAW="${{ inputs.params }}"
+        SESSION_ID="$(python3 -c "import uuid; print(str(uuid.uuid4()))")"
+
+        # Build --param flags as an array (handles values with spaces correctly)
+        PARAM_ARGS=()
+        if [ -n "$PARAMS_RAW" ]; then
+          while IFS= read -r line; do
+            line="$(echo "$line" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+            [ -z "$line" ] && continue
+            PARAM_ARGS+=("--param" "$line")
+          done <<< "$PARAMS_RAW"
+        fi
+
+        PROMPT_FILE="/tmp/gitx-exec-prompt.txt"
+
+        echo "Running: gitx procedure exec $PROCEDURE --print-prompt --session-id $SESSION_ID ${PARAM_ARGS[*]:-}"
+        gitx procedure exec "$PROCEDURE" \
+          --print-prompt \
+          --session-id "$SESSION_ID" \
+          "${PARAM_ARGS[@]}" \
+          > "$PROMPT_FILE"
+
+        echo "session_id=$SESSION_ID" >> "$GITHUB_OUTPUT"
+        echo "prompt_file=$PROMPT_FILE" >> "$GITHUB_OUTPUT"
+        echo "Procedure plan saved. Session: $SESSION_ID"
+        echo "Prompt length: $(wc -c < "$PROMPT_FILE") bytes"
+
+        # Print live run URL if backend is configured
+        if [ -n "${GITX_BACKEND_URL:-}" ]; then
+          echo ""
+          echo "📊 Live run: ${GITX_BACKEND_URL}/workflow-run?session_id=${SESSION_ID}"
+          echo ""
+        fi
+
+    # ─────────────────────────────────────────────
+    # Step 4: Write CI permissions settings
+    # ─────────────────────────────────────────────
+    - name: Write CI permissions settings
+      shell: python3 {0}
+      run: |
+        import json
+
+        settings = {
+          "permissions": {
+            "allow": [
+              "Bash",
+              "Read", "Write", "Edit", "Glob", "Grep",
+              "mcp__tasktracker",
+              "mcp__memory",
+              "mcp__proceduretracer"
+            ]
+          }
+        }
+
+        out = "/tmp/gitx-ci-settings.json"
+        with open(out, "w") as f:
+            json.dump(settings, f, indent=2)
+
+        print(f"CI settings written to {out}")
+        print(json.dumps(settings, indent=2))
+
+    # ─────────────────────────────────────────────
+    # Step 4b: Install Claude Code CLI
+    # ─────────────────────────────────────────────
+    - name: Install Claude Code CLI
+      shell: bash
+      run: |
+        if command -v claude &>/dev/null; then
+          echo "Claude already installed: $(claude --version 2>/dev/null || true)"
+        else
+          npm install -g @anthropic-ai/claude-code
+          echo "Claude installed: $(claude --version 2>/dev/null || true)"
+        fi
+
+    # ─────────────────────────────────────────────
+    # Step 5: Run Claude via claude -p
+    #   MCPs come from ~/.claude.json (written by gitx init).
+    #   Permissions come from /tmp/gitx-ci-settings.json (Step 4).
+    #   ANTHROPIC_BASE_URL routes all Claude API calls through the gitx
+    #   gateway so tool events are relayed to the Live Log UI.
+    # ─────────────────────────────────────────────
+    - name: Run claude -p
+      id: run-claude
+      shell: bash
+      env:
+        ANTHROPIC_API_KEY: ${{ env.ANTHROPIC_API_KEY }}
+        # Route all Claude API calls through the gitx gateway so tool events
+        # are relayed to the backend and appear in the Live Log UI.
+        ANTHROPIC_BASE_URL: http://localhost:8787
+        GITX_SESSION_ID: ${{ steps.run-procedure.outputs.session_id }}
+        GITX_PROJECT_ROOT: ${{ github.workspace }}
+        GITX_BACKEND_URL: ${{ env.GITX_BACKEND_URL }}
+        GITX_API_TOKEN: ${{ env.GITX_API_TOKEN }}
+        GITX_ORG_ID: ${{ env.GITX_ORG_ID }}
+      run: |
+        set -euo pipefail
+
+        SESSION_ID="${{ steps.run-procedure.outputs.session_id }}"
+        MODEL="${{ inputs.model }}"
+        MAX_TURNS="${{ inputs.max_turns }}"
+        PROMPT_FILE="${{ steps.run-procedure.outputs.prompt_file }}"
+
+        # Build optional flags
+        EXTRA_ARGS=()
+        [ -n "$MODEL" ] && EXTRA_ARGS+=("--model" "$MODEL")
+        [ -n "$MAX_TURNS" ] && EXTRA_ARGS+=("--max-turns" "$MAX_TURNS")
+
+        echo "=== Running claude -p (session: $SESSION_ID) ==="
+        set -o pipefail
+        claude -p "$(cat "$PROMPT_FILE")" \
+          --settings /tmp/gitx-ci-settings.json \
+          --session-id "$SESSION_ID" \
+          --output-format text \
+          "${EXTRA_ARGS[@]}" \
+          2>&1 | tee /tmp/gitx-claude.log
+        EXIT=${PIPESTATUS[0]}
+        echo "claude -p exit code: $EXIT"
+
+        # Extract ci_status from final report if available
+        if grep -q "Overall: PASS" /tmp/gitx-claude.log 2>/dev/null; then
+          echo "conclusion=PASS" >> "$GITHUB_OUTPUT"
+        elif grep -q "Overall: FAIL" /tmp/gitx-claude.log 2>/dev/null; then
+          echo "conclusion=FAIL" >> "$GITHUB_OUTPUT"
+        else
+          echo "conclusion=UNKNOWN" >> "$GITHUB_OUTPUT"
+        fi
+
+        exit $EXIT
+
+    # ─────────────────────────────────────────────
+    # Step 5b: Dump claude log (always)
+    # ─────────────────────────────────────────────
+    - name: Dump claude log
+      shell: bash
+      if: always()
+      run: |
+        echo "=== /tmp/gitx-claude.log (last 300 lines) ==="
+        tail -300 /tmp/gitx-claude.log 2>/dev/null || echo "(no log)"
+
+    # ─────────────────────────────────────────────
+    # Step 6: Stop gateway (best-effort cleanup)
+    # ─────────────────────────────────────────────
+    - name: Stop gitx gateway
+      shell: bash
+      if: always()
+      run: gitx gateway stop || true
