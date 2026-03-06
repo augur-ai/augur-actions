@@ -47,6 +47,13 @@ inputs:
     required: false
     default: ''
 
+  working_directory:
+    description: |
+      Working directory for gitx commands. Defaults to the workspace root.
+      Set this for monorepos where the procedure lives in a subdirectory.
+    required: false
+    default: '.'
+
 outputs:
   session_id:
     description: 'gitx session ID for this procedure run'
@@ -149,6 +156,7 @@ runs:
     - name: Build procedure exec prompt
       id: run-procedure
       shell: bash
+      working-directory: ${{ inputs.working_directory }}
       env:
         GITX_API_TOKEN: ${{ env.GITX_API_TOKEN }}
       run: |
@@ -246,7 +254,7 @@ runs:
         # are relayed to the backend and appear in the Live Log UI.
         ANTHROPIC_BASE_URL: http://localhost:8787
         GITX_SESSION_ID: ${{ steps.run-procedure.outputs.session_id }}
-        GITX_PROJECT_ROOT: ${{ github.workspace }}
+        GITX_PROJECT_ROOT: ${{ github.workspace }}/${{ inputs.working_directory }}
         GITX_API_TOKEN: ${{ env.GITX_API_TOKEN }}
       run: |
         set -euo pipefail
