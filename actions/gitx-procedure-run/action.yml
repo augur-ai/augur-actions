@@ -67,6 +67,7 @@ runs:
       env:
         GITX_VERSION: ${{ inputs.gitx_version }}
         GITX_BINARY_PATH: ${{ inputs.gitx_binary_path }}
+        GH_TOKEN: ${{ github.token }}
       run: |
         set -euo pipefail
 
@@ -78,39 +79,26 @@ runs:
           echo "Using pre-built gitx binary: $GITX_BINARY_PATH"
           install -m 755 "$GITX_BINARY_PATH" "$INSTALL_DIR/gitx"
         else
-          # Resolve brew — GHA ubuntu runners have linuxbrew at a fixed path
-          BREW=""
-          if command -v brew &>/dev/null; then
-            BREW="brew"
-          elif [ -x /home/linuxbrew/.linuxbrew/bin/brew ]; then
-            BREW="/home/linuxbrew/.linuxbrew/bin/brew"
-            eval "$($BREW shellenv)"
+          OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
+          ARCH="$(uname -m)"
+          case "$ARCH" in
+            x86_64)  ARCH="amd64" ;;
+            aarch64|arm64) ARCH="arm64" ;;
+            *) echo "Unsupported architecture: $ARCH"; exit 1 ;;
+          esac
+
+          if [ "$GITX_VERSION" = "latest" ]; then
+            GITX_VERSION="$(gh release list --repo augur-ai/augur-jobs --limit 1 --json tagName --jq '.[0].tagName')"
           fi
 
-          if [ -n "$BREW" ]; then
-            echo "Installing gitx via Homebrew (augur-ai/tap/gitx)..."
-            $BREW install augur-ai/tap/gitx
-            ln -sf "$($BREW --prefix)/bin/gitx" "$INSTALL_DIR/gitx"
-          else
-            # Fallback: download tarball from GitHub releases
-            OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
-            ARCH="$(uname -m)"
-            case "$ARCH" in
-              x86_64)  ARCH="amd64" ;;
-              aarch64|arm64) ARCH="arm64" ;;
-              *) echo "Unsupported architecture: $ARCH"; exit 1 ;;
-            esac
-            if [ "$GITX_VERSION" = "latest" ]; then
-              GITX_VERSION="$(curl -fsSL https://api.github.com/repos/augur-ai/augur-jobs/releases/latest \
-                | python3 -c "import sys,json; print(json.load(sys.stdin)['tag_name'])")"
-            fi
-            ASSET="gitx_${GITX_VERSION#v}_${OS}_${ARCH}.tar.gz"
-            URL="https://github.com/augur-ai/augur-jobs/releases/download/${GITX_VERSION}/${ASSET}"
-            echo "Downloading gitx ${GITX_VERSION} (${OS}/${ARCH})..."
-            curl -fsSL "$URL" -o /tmp/gitx.tar.gz
-            tar -xzf /tmp/gitx.tar.gz -C /tmp
-            install -m 755 /tmp/gitx "$INSTALL_DIR/gitx"
-          fi
+          ASSET="gitx_${GITX_VERSION#v}_${OS}_${ARCH}.tar.gz"
+          echo "Downloading gitx ${GITX_VERSION} (${OS}/${ARCH}) via gh release download..."
+          gh release download "${GITX_VERSION}" \
+            --repo augur-ai/augur-jobs \
+            --pattern "$ASSET" \
+            --output /tmp/gitx.tar.gz
+          tar -xzf /tmp/gitx.tar.gz -C /tmp
+          install -m 755 /tmp/gitx "$INSTALL_DIR/gitx"
         fi
 
         # Running gitx once extracts embedded MCP binaries to ~/.gitx/bin/
