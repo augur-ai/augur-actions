@@ -10,8 +10,7 @@ Add these to your repository (`Settings` → `Secrets and variables` → `Action
 |--------|----------|-------------|
 | `ANTHROPIC_API_KEY` | Yes | Anthropic API key for Claude |
 | `GITX_API_TOKEN` | Yes | gitx registry API token |
-| `GITX_BACKEND_URL` | No | gitx backend URL — enables Live Log UI and event relay |
-| `GITX_ORG_ID` | No | Organization ID — required when `GITX_BACKEND_URL` is set |
+| `GITX_BACKEND_URL` | No | gitx backend URL — defaults to `https://app.gittrace.ai` |
 
 ### 2. Add a workflow
 
@@ -31,8 +30,7 @@ jobs:
     env:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       GITX_API_TOKEN: ${{ secrets.GITX_API_TOKEN }}
-      GITX_BACKEND_URL: ${{ secrets.GITX_BACKEND_URL }}
-      GITX_ORG_ID: ${{ secrets.GITX_ORG_ID }}
+      # GITX_BACKEND_URL: ${{ secrets.GITX_BACKEND_URL }}  # optional, defaults to https://app.gittrace.ai
     steps:
       - uses: actions/checkout@v4
 
@@ -100,13 +98,11 @@ Open the link to follow task progress and logs in real time.
 # .act.env
 ANTHROPIC_API_KEY=sk-...
 GITX_API_TOKEN=...
-GITX_BACKEND_URL=https://your-backend
-GITX_ORG_ID=...
+# GITX_BACKEND_URL=https://app.gittrace.ai  # optional override
 
 act workflow_dispatch \
   --env-file .act.env \
   --input procedure=my-procedure \
-  --var GITX_BINARY_PATH=/path/to/gitx-linux-arm64 \
   --container-architecture linux/arm64 \
   --network host
 ```

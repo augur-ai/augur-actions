@@ -23,8 +23,6 @@ jobs:
     env:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       GITX_API_TOKEN: ${{ secrets.GITX_API_TOKEN }}
-      GITX_BACKEND_URL: ${{ secrets.GITX_BACKEND_URL }}
-      GITX_ORG_ID: ${{ secrets.GITX_ORG_ID }}
     steps:
       - uses: actions/checkout@v4
 
