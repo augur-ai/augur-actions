@@ -275,10 +275,10 @@ runs:
         EXIT=${PIPESTATUS[0]}
         echo "claude -p exit code: $EXIT"
 
-        # Extract ci_status from final report if available
-        if grep -q "Overall: PASS" /tmp/gitx-claude.log 2>/dev/null; then
+        # Extract ci_status — match various forms Claude uses: "Overall: PASS", "**PASS**", "Status: PASS"
+        if grep -qiE "(Overall|Status)[^a-zA-Z]*(PASS)|[*_]{0,2}PASS[*_]{0,2}" /tmp/gitx-claude.log 2>/dev/null; then
           echo "conclusion=PASS" >> "$GITHUB_OUTPUT"
-        elif grep -q "Overall: FAIL" /tmp/gitx-claude.log 2>/dev/null; then
+        elif grep -qiE "(Overall|Status)[^a-zA-Z]*(FAIL)|[*_]{0,2}FAIL[*_]{0,2}" /tmp/gitx-claude.log 2>/dev/null; then
           echo "conclusion=FAIL" >> "$GITHUB_OUTPUT"
         else
           echo "conclusion=UNKNOWN" >> "$GITHUB_OUTPUT"
