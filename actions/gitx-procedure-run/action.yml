@@ -191,10 +191,12 @@ runs:
         echo "Procedure plan saved. Session: $SESSION_ID"
         echo "Prompt length: $(wc -c < "$PROMPT_FILE") bytes"
 
-        # Print live run URL if backend is configured
+        # Print live run URL after session bind (--print-prompt registers session with gateway)
         if [ -n "${GITX_BACKEND_URL:-}" ]; then
+          LIVE_URL="${GITX_BACKEND_URL}/workflow-run?session_id=${SESSION_ID}"
           echo ""
-          echo "📊 Live run: ${GITX_BACKEND_URL}/workflow-run?session_id=${SESSION_ID}"
+          echo "::notice title=Live Run::${LIVE_URL}"
+          echo "📊 Live run: ${LIVE_URL}"
           echo ""
         fi
 
