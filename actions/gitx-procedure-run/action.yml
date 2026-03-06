@@ -314,14 +314,28 @@ runs:
         exit $EXIT
 
     # ─────────────────────────────────────────────
-    # Step 5b: Dump claude log (always)
+    # Step 5b: Dump debug info (always)
     # ─────────────────────────────────────────────
-    - name: Dump claude log
+    - name: Dump debug info
       shell: bash
       if: always()
+      env:
+        GITX_SESSION_ID: ${{ steps.run-procedure.outputs.session_id }}
       run: |
         echo "=== /tmp/gitx-claude.log (last 300 lines) ==="
         tail -300 /tmp/gitx-claude.log 2>/dev/null || echo "(no log)"
+
+        echo ""
+        echo "=== ~/.gitx/sessions/$GITX_SESSION_ID/tasks.json ==="
+        cat "$HOME/.gitx/sessions/$GITX_SESSION_ID/tasks.json" 2>/dev/null || echo "(no tasks.json — MCP task tools were NOT called)"
+
+        echo ""
+        echo "=== ~/.gitx/gateway.log (last 50 lines) ==="
+        tail -50 "$HOME/.gitx/gateway.log" 2>/dev/null || echo "(no gateway log)"
+
+        echo ""
+        echo "=== /tmp/gitx-mcp-config.json ==="
+        cat /tmp/gitx-mcp-config.json 2>/dev/null || echo "(no mcp config)"
 
     # ─────────────────────────────────────────────
     # Step 6: Stop gateway (best-effort cleanup)
