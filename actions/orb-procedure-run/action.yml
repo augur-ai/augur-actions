@@ -1,5 +1,5 @@
-name: 'gitx Procedure Run'
-description: 'Run a gitx procedure using Claude Code as the execution engine'
+name: 'orb Procedure Run'
+description: 'Run an orb procedure using Claude Code as the execution engine'
 author: 'augur-ai'
 
 branding:
@@ -8,8 +8,8 @@ branding:
 
 # Secrets are read from environment variables set at the workflow/repo level:
 #   ANTHROPIC_API_KEY  — Anthropic API key
-#   GITX_API_TOKEN     — gitx registry API token
-#   GITX_BACKEND_URL   — gitx backend URL (defaults to https://app.gittrace.ai)
+#   ORB_API_TOKEN     — orb registry API token
+#   ORB_BACKEND_URL   — orb backend URL (defaults to https://app.gittrace.ai)
 
 inputs:
   procedure:
@@ -18,21 +18,21 @@ inputs:
 
   params:
     description: |
-      Newline-separated key=value pairs passed as --param flags to gitx procedure exec.
+      Newline-separated key=value pairs passed as --param flags to orb procedure exec.
       Example:
         repo_path=/home/runner/work/myapp/myapp
         node_version=20
     required: false
     default: ''
 
-  gitx_version:
-    description: 'gitx version to install (e.g. v0.5.0). Defaults to latest.'
+  orb_version:
+    description: 'orb version to install (e.g. v0.5.0). Defaults to latest.'
     required: false
     default: 'latest'
 
-  gitx_binary_path:
+  orb_binary_path:
     description: |
-      Path to a pre-built gitx binary. If set, skips the download step.
+      Path to a pre-built orb binary. If set, skips the download step.
       Useful for local act testing or air-gapped environments.
     required: false
     default: ''
@@ -49,14 +49,14 @@ inputs:
 
   working_directory:
     description: |
-      Working directory for gitx commands. Defaults to the workspace root.
+      Working directory for orb commands. Defaults to the workspace root.
       Set this for monorepos where the procedure lives in a subdirectory.
     required: false
     default: '.'
 
 outputs:
   session_id:
-    description: 'gitx session ID for this procedure run'
+    description: 'orb session ID for this procedure run'
     value: ${{ steps.run-procedure.outputs.session_id }}
 
   run_status:
@@ -67,13 +67,13 @@ runs:
   using: 'composite'
   steps:
     # ─────────────────────────────────────────────
-    # Step 1: Install gitx binary
+    # Step 1: Install orb binary
     # ─────────────────────────────────────────────
-    - name: Install gitx
+    - name: Install orb
       shell: bash
       env:
-        GITX_VERSION: ${{ inputs.gitx_version }}
-        GITX_BINARY_PATH: ${{ inputs.gitx_binary_path }}
+        ORB_VERSION: ${{ inputs.orb_version }}
+        ORB_BINARY_PATH: ${{ inputs.orb_binary_path }}
         GH_TOKEN: ${{ github.token }}
       run: |
         set -euo pipefail
@@ -81,10 +81,10 @@ runs:
         INSTALL_DIR="$HOME/.local/bin"
         mkdir -p "$INSTALL_DIR"
 
-        if [ -n "$GITX_BINARY_PATH" ]; then
+        if [ -n "$ORB_BINARY_PATH" ]; then
           # Pre-built binary — for local act testing only
-          echo "Using pre-built gitx binary: $GITX_BINARY_PATH"
-          install -m 755 "$GITX_BINARY_PATH" "$INSTALL_DIR/gitx"
+          echo "Using pre-built orb binary: $ORB_BINARY_PATH"
+          install.*orb"
         else
           OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
           ARCH="$(uname -m)"
@@ -94,55 +94,55 @@ runs:
             *) echo "Unsupported architecture: $ARCH"; exit 1 ;;
           esac
 
-          if [ "$GITX_VERSION" = "latest" ]; then
-            GITX_VERSION="$(gh release list --repo augur-ai/augur-jobs --limit 1 --json tagName --jq '.[0].tagName')"
+          if [ "$ORB_VERSION" = "latest" ]; then
+            ORB_VERSION="$(gh release list --repo augur-ai/augur-jobs --limit 1 --json tagName --jq '.[0].tagName')"
           fi
 
-          ASSET="gitx_${GITX_VERSION#v}_${OS}_${ARCH}.tar.gz"
-          echo "Downloading gitx ${GITX_VERSION} (${OS}/${ARCH}) via gh release download..."
-          gh release download "${GITX_VERSION}" \
+          ASSET="orb_${ORB_VERSION#v}_${OS}_${ARCH}.tar.gz"
+          echo "Downloading orb ${ORB_VERSION} (${OS}/${ARCH}) via gh release download..."
+          gh release download "${ORB_VERSION}" \
             --repo augur-ai/augur-jobs \
             --pattern "$ASSET" \
-            --output /tmp/gitx.tar.gz
-          tar -xzf /tmp/gitx.tar.gz -C /tmp
-          install -m 755 /tmp/gitx "$INSTALL_DIR/gitx"
+            --output /tmp/orb.tar.gz
+          tar -xzf /tmp/orb.tar.gz -C /tmp
+          install.*orb"
         fi
 
-        # Running gitx once extracts embedded MCP binaries to ~/.gitx/bin/
-        "$INSTALL_DIR/gitx" --version
+        # Running orb once extracts embedded MCP binaries to ~/.orb/bin/
+        "$INSTALL_DIR/orb" --version
         echo "$INSTALL_DIR" >> "$GITHUB_PATH"
-        echo "gitx installed: $("$INSTALL_DIR/gitx" --version)"
+        echo "orb install.*orb" --version)"
 
     # ─────────────────────────────────────────────
-    # Step 1b: Authenticate gitx
+    # Step 1b: Authenticate orb
     # ─────────────────────────────────────────────
-    - name: Authenticate gitx
+    - name: Authenticate orb
       shell: bash
       env:
-        GITX_API_TOKEN: ${{ env.GITX_API_TOKEN }}
+        ORB_API_TOKEN: ${{ env.ORB_API_TOKEN }}
       run: |
-        BACKEND_URL="${GITX_BACKEND_URL:-https://app.gittrace.ai}"
-        gitx auth login --backend "$BACKEND_URL"
+        BACKEND_URL="${ORB_BACKEND_URL:-https://app.gittrace.ai}"
+        orb auth login --backend "$BACKEND_URL"
 
     # ─────────────────────────────────────────────
-    # Step 1c: Initialize gitx (extracts MCPs, writes Claude hooks)
+    # Step 1c: Initialize orb (extracts MCPs, writes Claude hooks)
     # ─────────────────────────────────────────────
-    - name: Initialize gitx
+    - name: Initialize orb
       shell: bash
-      run: gitx init --skip-index --no-browser --no-report --agents=claude
+      run: orb init --skip-index --no-browser --no-report --agents=claude
 
     # ─────────────────────────────────────────────
-    # Step 2: Start gitx gateway (must be up before --print-prompt so session
+    # Step 2: Start orb gateway (must be up before --print-prompt so session
     #          registration succeeds and EventRelay can forward events)
     # ─────────────────────────────────────────────
-    - name: Start gitx gateway
+    - name: Start orb gateway
       shell: bash
       env:
-        GITX_API_TOKEN: ${{ env.GITX_API_TOKEN }}
-        GITX_PROJECT_ROOT: ${{ github.workspace }}/${{ inputs.working_directory }}
+        ORB_API_TOKEN: ${{ env.ORB_API_TOKEN }}
+        ORB_PROJECT_ROOT: ${{ github.workspace }}/${{ inputs.working_directory }}
       run: |
-        BACKEND_URL="${GITX_BACKEND_URL:-https://app.gittrace.ai}"
-        gitx gateway start --background --backend-url "$BACKEND_URL"
+        BACKEND_URL="${ORB_BACKEND_URL:-https://app.gittrace.ai}"
+        orb gateway start --background --backend-url "$BACKEND_URL"
         for i in $(seq 1 15); do
           if curl -s -o /dev/null --connect-timeout 2 http://localhost:8788/_gittrace/session/bind 2>/dev/null; then
             echo "Gateway ready on port 8788"; break
@@ -158,8 +158,8 @@ runs:
       id: run-procedure
       shell: bash
       env:
-        GITX_API_TOKEN: ${{ env.GITX_API_TOKEN }}
-        GITX_PROJECT_ROOT: ${{ github.workspace }}/${{ inputs.working_directory }}
+        ORB_API_TOKEN: ${{ env.ORB_API_TOKEN }}
+        ORB_PROJECT_ROOT: ${{ github.workspace }}/${{ inputs.working_directory }}
       run: |
         set -euo pipefail
 
@@ -177,10 +177,10 @@ runs:
           done <<< "$PARAMS_RAW"
         fi
 
-        PROMPT_FILE="/tmp/gitx-exec-prompt.txt"
+        PROMPT_FILE="/tmp/orb-exec-prompt.txt"
 
-        echo "Running: gitx procedure exec $PROCEDURE --print-prompt --session-id $SESSION_ID ${PARAM_ARGS[*]:-}"
-        gitx procedure exec "$PROCEDURE" \
+        echo "Running: orb procedure exec $PROCEDURE --print-prompt --session-id $SESSION_ID ${PARAM_ARGS[*]:-}"
+        orb procedure exec "$PROCEDURE" \
           --print-prompt \
           --session-id "$SESSION_ID" \
           "${PARAM_ARGS[@]}" \
@@ -192,7 +192,7 @@ runs:
         echo "Prompt length: $(wc -c < "$PROMPT_FILE") bytes"
 
         # Print live run URL after session bind (--print-prompt registers session with gateway)
-        BACKEND_URL="${GITX_BACKEND_URL:-https://app.gittrace.ai}"
+        BACKEND_URL="${ORB_BACKEND_URL:-https://app.gittrace.ai}"
         LIVE_URL="${BACKEND_URL}/workflow-run?session_id=${SESSION_ID}"
         echo ""
         echo "::notice title=Live Run::${LIVE_URL}"
@@ -219,14 +219,14 @@ runs:
           }
         }
 
-        out = "/tmp/gitx-ci-settings.json"
+        out = "/tmp/orb-ci-settings.json"
         with open(out, "w") as f:
             json.dump(settings, f, indent=2)
 
         print(f"CI settings written to {out}")
         print(json.dumps(settings, indent=2))
 
-        # Extract mcpServers from ~/.claude.json (written by gitx init) into a
+        # Extract mcpServers from ~/.claude.json (written by orb init) into a
         # dedicated --mcp-config file.  claude -p does not auto-read ~/.claude.json
         # in non-interactive pipe mode, so we must pass --mcp-config explicitly.
         claude_json_path = pathlib.Path.home() / ".claude.json"
@@ -238,7 +238,7 @@ runs:
             except Exception as e:
                 print(f"Warning: could not parse ~/.claude.json: {e}")
 
-        mcp_out = "/tmp/gitx-mcp-config.json"
+        mcp_out = "/tmp/orb-mcp-config.json"
         with open(mcp_out, "w") as f:
             json.dump(mcp_config, f, indent=2)
 
@@ -266,7 +266,7 @@ runs:
       run: |
         echo "=== MCP binary check ==="
         for bin in mcp-tasktracker mcp-memory mcp-procedure-trace; do
-          BIN_PATH="$HOME/.gitx/bin/$bin"
+          BIN_PATH="$HOME/.orb/bin/$bin"
           if [ -f "$BIN_PATH" ]; then
             echo "$bin: exists"
             file "$BIN_PATH" || true
@@ -279,9 +279,9 @@ runs:
 
     # ─────────────────────────────────────────────
     # Step 5: Run Claude via claude -p
-    #   --mcp-config   /tmp/gitx-mcp-config.json  (extracted from ~/.claude.json by Step 4)
-    #   --settings     /tmp/gitx-ci-settings.json  (permissions — Step 4)
-    #   ANTHROPIC_BASE_URL routes all Claude API calls through the gitx
+    #   --mcp-config   /tmp/orb-mcp-config.json  (extracted from ~/.claude.json by Step 4)
+    #   --settings     /tmp/orb-ci-settings.json  (permissions — Step 4)
+    #   ANTHROPIC_BASE_URL routes all Claude API calls through the orb
     #   gateway so tool events are relayed to the Live Log UI.
     #   Note: claude -p does NOT auto-load ~/.claude.json in pipe mode;
     #   --mcp-config must be passed explicitly for MCP tools to be available.
@@ -291,13 +291,13 @@ runs:
       shell: bash
       env:
         ANTHROPIC_API_KEY: ${{ env.ANTHROPIC_API_KEY }}
-        # Route all Claude API calls through the gitx gateway so tool events
+        # Route all Claude API calls through the orb gateway so tool events
         # are relayed to the backend and appear in the Live Log UI.
         ANTHROPIC_BASE_URL: http://localhost:8787
-        GITX_SESSION_ID: ${{ steps.run-procedure.outputs.session_id }}
-        GITX_PROJECT_ROOT: ${{ github.workspace }}/${{ inputs.working_directory }}
-        GITX_API_TOKEN: ${{ env.GITX_API_TOKEN }}
-        GITX_BACKEND_URL: ${{ env.GITX_BACKEND_URL || 'https://app.gittrace.ai' }}
+        ORB_SESSION_ID: ${{ steps.run-procedure.outputs.session_id }}
+        ORB_PROJECT_ROOT: ${{ github.workspace }}/${{ inputs.working_directory }}
+        ORB_API_TOKEN: ${{ env.ORB_API_TOKEN }}
+        ORB_BACKEND_URL: ${{ env.ORB_BACKEND_URL || 'https://app.gittrace.ai' }}
       run: |
         set -euo pipefail
 
@@ -314,19 +314,19 @@ runs:
         echo "=== Running claude -p (session: $SESSION_ID) ==="
         set -o pipefail
         claude -p "$(cat "$PROMPT_FILE")" \
-          --mcp-config /tmp/gitx-mcp-config.json \
-          --settings /tmp/gitx-ci-settings.json \
+          --mcp-config /tmp/orb-mcp-config.json \
+          --settings /tmp/orb-ci-settings.json \
           --session-id "$SESSION_ID" \
           --output-format text \
           "${EXTRA_ARGS[@]}" \
-          2>&1 | tee /tmp/gitx-claude.log
+          2>&1 | tee /tmp/orb-claude.log
         EXIT=${PIPESTATUS[0]}
         echo "claude -p exit code: $EXIT"
 
         # Extract ci_status — match various forms Claude uses: "Overall: PASS", "**PASS**", "Status: PASS"
-        if grep -qiE "(Overall|Status)[^a-zA-Z]*(PASS)|[*_]{0,2}PASS[*_]{0,2}" /tmp/gitx-claude.log 2>/dev/null; then
+        if grep -qiE "(Overall|Status)[^a-zA-Z]*(PASS)|[*_]{0,2}PASS[*_]{0,2}" /tmp/orb-claude.log 2>/dev/null; then
           echo "run_status=PASS" >> "$GITHUB_OUTPUT"
-        elif grep -qiE "(Overall|Status)[^a-zA-Z]*(FAIL)|[*_]{0,2}FAIL[*_]{0,2}" /tmp/gitx-claude.log 2>/dev/null; then
+        elif grep -qiE "(Overall|Status)[^a-zA-Z]*(FAIL)|[*_]{0,2}FAIL[*_]{0,2}" /tmp/orb-claude.log 2>/dev/null; then
           echo "run_status=FAIL" >> "$GITHUB_OUTPUT"
         else
           echo "run_status=UNKNOWN" >> "$GITHUB_OUTPUT"
@@ -341,31 +341,31 @@ runs:
       shell: bash
       if: always()
       env:
-        GITX_SESSION_ID: ${{ steps.run-procedure.outputs.session_id }}
+        ORB_SESSION_ID: ${{ steps.run-procedure.outputs.session_id }}
       run: |
-        echo "=== /tmp/gitx-claude.log (last 300 lines) ==="
-        tail -300 /tmp/gitx-claude.log 2>/dev/null || echo "(no log)"
+        echo "=== /tmp/orb-claude.log (last 300 lines) ==="
+        tail -300 /tmp/orb-claude.log 2>/dev/null || echo "(no log)"
 
         echo ""
-        echo "=== ~/.gitx/sessions/$GITX_SESSION_ID/tasks.json ==="
-        cat "$HOME/.gitx/sessions/$GITX_SESSION_ID/tasks.json" 2>/dev/null || echo "(no tasks.json — MCP task tools were NOT called)"
+        echo "=== ~/.orb/sessions/$ORB_SESSION_ID/tasks.json ==="
+        cat "$HOME/.orb/sessions/$ORB_SESSION_ID/tasks.json" 2>/dev/null || echo "(no tasks.json — MCP task tools were NOT called)"
 
         echo ""
-        echo "=== ~/.gitx/gateway.log (last 50 lines) ==="
-        tail -50 "$HOME/.gitx/gateway.log" 2>/dev/null || echo "(no gateway log)"
+        echo "=== ~/.orb/gateway.log (last 50 lines) ==="
+        tail -50 "$HOME/.orb/gateway.log" 2>/dev/null || echo "(no gateway log)"
 
         echo ""
         echo "=== /tmp/mcp-tasktracker.log (last 50 lines) ==="
         tail -50 /tmp/mcp-tasktracker.log 2>/dev/null || echo "(no mcp-tasktracker log)"
 
         echo ""
-        echo "=== /tmp/gitx-mcp-config.json ==="
-        cat /tmp/gitx-mcp-config.json 2>/dev/null || echo "(no mcp config)"
+        echo "=== /tmp/orb-mcp-config.json ==="
+        cat /tmp/orb-mcp-config.json 2>/dev/null || echo "(no mcp config)"
 
     # ─────────────────────────────────────────────
     # Step 6: Stop gateway (best-effort cleanup)
     # ─────────────────────────────────────────────
-    - name: Stop gitx gateway
+    - name: Stop orb gateway
       shell: bash
       if: always()
-      run: gitx gateway stop || true
+      run: orb gateway stop || true

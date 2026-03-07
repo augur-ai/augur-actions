@@ -1,4 +1,4 @@
-# gitx-procedure-run: Consumption Guide
+# orb-procedure-run: Consumption Guide
 
 ## Setup
 
@@ -9,13 +9,13 @@ Add these to your repository (`Settings` → `Secrets and variables` → `Action
 | Secret | Required | Description |
 |--------|----------|-------------|
 | `ANTHROPIC_API_KEY` | Yes | Anthropic API key for Claude |
-| `GITX_API_TOKEN` | Yes | gitx registry API token |
-| `GITX_BACKEND_URL` | No | gitx backend URL — defaults to `https://app.gittrace.ai` |
+| `ORB_API_TOKEN` | Yes | orb registry API token |
+| `ORB_BACKEND_URL` | No | orb backend URL — defaults to `https://app.gittrace.ai` |
 
 ### 2. Add a workflow
 
 ```yaml
-name: Run gitx Procedure
+name: Run orb Procedure
 
 on:
   workflow_dispatch:
@@ -29,12 +29,12 @@ jobs:
     runs-on: ubuntu-latest
     env:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-      GITX_API_TOKEN: ${{ secrets.GITX_API_TOKEN }}
-      # GITX_BACKEND_URL: ${{ secrets.GITX_BACKEND_URL }}  # optional, defaults to https://app.gittrace.ai
+      ORB_API_TOKEN: ${{ secrets.ORB_API_TOKEN }}
+      # ORB_BACKEND_URL: ${{ secrets.ORB_BACKEND_URL }}  # optional, defaults to https://app.gittrace.ai
     steps:
       - uses: actions/checkout@v4
 
-      - uses: augur-ai/augur-actions/actions/gitx-procedure-run@main
+      - uses: augur-ai/augur-actions/actions/orb-procedure-run@main
         with:
           procedure: ${{ github.event.inputs.procedure }}
 ```
@@ -47,20 +47,20 @@ jobs:
 | `params` | No | `''` | Newline-separated `key=value` pairs passed as `--param` flags |
 | `model` | No | `claude-sonnet-4-5` | Claude model to use |
 | `max_turns` | No | unlimited | Max agentic turns Claude can take |
-| `gitx_version` | No | `latest` | gitx version to install |
-| `gitx_binary_path` | No | `''` | Path to pre-built binary (for local act testing) |
+| `orb_version` | No | `latest` | orb version to install |
+| `orb_binary_path` | No | `''` | Path to pre-built binary (for local act testing) |
 
 ## Outputs
 
 | Output | Description |
 |--------|-------------|
-| `session_id` | gitx session ID for this run |
+| `session_id` | orb session ID for this run |
 | `run_status` | `PASS`, `FAIL`, or `UNKNOWN` from the procedure's final report |
 
 ## Passing parameters
 
 ```yaml
-- uses: augur-ai/augur-actions/actions/gitx-procedure-run@main
+- uses: augur-ai/augur-actions/actions/orb-procedure-run@main
   with:
     procedure: my-procedure
     params: |
@@ -72,19 +72,19 @@ jobs:
 ## Checking the result
 
 ```yaml
-- id: gitx
-  uses: augur-ai/augur-actions/actions/gitx-procedure-run@main
+- id: orb
+  uses: augur-ai/augur-actions/actions/orb-procedure-run@main
   with:
     procedure: my-procedure
 
 - name: Check result
-  if: steps.gitx.outputs.run_status == 'FAIL'
+  if: steps.orb.outputs.run_status == 'FAIL'
   run: echo "Procedure failed" && exit 1
 ```
 
 ## Live Log UI
 
-When `GITX_BACKEND_URL` is set, the action prints a clickable link after session bind:
+When `ORB_BACKEND_URL` is set, the action prints a clickable link after session bind:
 
 ```
 📊 Live run: https://your-backend/workflow-run?session_id=<id>
@@ -97,8 +97,8 @@ Open the link to follow task progress and logs in real time.
 ```bash
 # .act.env
 ANTHROPIC_API_KEY=sk-...
-GITX_API_TOKEN=...
-# GITX_BACKEND_URL=https://app.gittrace.ai  # optional override
+ORB_API_TOKEN=...
+# ORB_BACKEND_URL=https://app.gittrace.ai  # optional override
 
 act workflow_dispatch \
   --env-file .act.env \
