@@ -139,6 +139,7 @@ runs:
       shell: bash
       env:
         GITX_API_TOKEN: ${{ env.GITX_API_TOKEN }}
+        GITX_PROJECT_ROOT: ${{ github.workspace }}/${{ inputs.working_directory }}
       run: |
         BACKEND_URL="${GITX_BACKEND_URL:-https://app.gittrace.ai}"
         gitx gateway start --background --backend-url "$BACKEND_URL"
