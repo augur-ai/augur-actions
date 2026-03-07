@@ -355,6 +355,10 @@ runs:
         tail -50 "$HOME/.gitx/gateway.log" 2>/dev/null || echo "(no gateway log)"
 
         echo ""
+        echo "=== /tmp/mcp-tasktracker.log (last 50 lines) ==="
+        tail -50 /tmp/mcp-tasktracker.log 2>/dev/null || echo "(no mcp-tasktracker log)"
+
+        echo ""
         echo "=== /tmp/gitx-mcp-config.json ==="
         cat /tmp/gitx-mcp-config.json 2>/dev/null || echo "(no mcp config)"
 
