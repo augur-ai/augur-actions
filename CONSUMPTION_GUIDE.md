@@ -10,7 +10,7 @@ Add these to your repository (`Settings` → `Secrets and variables` → `Action
 |--------|----------|-------------|
 | `ANTHROPIC_API_KEY` | Yes | Anthropic API key for Claude |
 | `ORB_API_TOKEN` | Yes | orb registry API token (or use `GITX_API_TOKEN` for backward compatibility) |
-| `ORB_BACKEND_URL` | No | orb backend URL — defaults to `https://app.gittrace.ai` (or use `GITX_BACKEND_URL`) |
+| `ORB_BACKEND_URL` | No | orb backend URL — defaults to `https://app.getaugur.ai` (or use `GITX_BACKEND_URL`) |
 
 ### 2. Add a workflow
 
@@ -30,7 +30,7 @@ jobs:
     env:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       ORB_API_TOKEN: ${{ secrets.ORB_API_TOKEN }}
-      # ORB_BACKEND_URL: ${{ secrets.ORB_BACKEND_URL }}  # optional, defaults to https://app.gittrace.ai
+      # ORB_BACKEND_URL: ${{ secrets.ORB_BACKEND_URL }}  # optional, defaults to https://app.getaugur.ai
     steps:
       - uses: actions/checkout@v4
 
@@ -98,7 +98,7 @@ Open the link to follow task progress and logs in real time.
 # .act.env
 ANTHROPIC_API_KEY=sk-...
 ORB_API_TOKEN=...
-# ORB_BACKEND_URL=https://app.gittrace.ai  # optional override
+# ORB_BACKEND_URL=https://app.getaugur.ai  # optional override
 
 act workflow_dispatch \
   --env-file .act.env \
