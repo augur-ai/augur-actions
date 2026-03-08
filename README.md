@@ -6,7 +6,7 @@ GitHub Actions for running [orb](https://github.com/augur-ai/augur-jobs) procedu
 
 ### `orb-procedure-run`
 
-Runs a orb procedure end-to-end:
+Runs an orb procedure end-to-end:
 1. Installs orb and Claude Code CLI
 2. Authenticates with the orb registry
 3. Starts the orb gateway (for Live Log event relay)
