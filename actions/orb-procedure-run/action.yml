@@ -8,8 +8,8 @@ branding:
 
 # Secrets are read from environment variables set at the workflow/repo level:
 #   ANTHROPIC_API_KEY  — Anthropic API key
-#   ORB_API_TOKEN      — orb registry API token (or GITX_API_TOKEN for backward compatibility)
-#   ORB_BACKEND_URL    — orb backend URL (or GITX_BACKEND_URL; defaults to https://app.getaugur.ai)
+#   ORB_API_TOKEN      — orb registry API token
+#   ORB_BACKEND_URL    — orb backend URL (defaults to https://app.getaugur.ai)
 
 inputs:
   procedure:
@@ -72,9 +72,7 @@ runs:
     - name: Install orb
       shell: bash
       env:
-        ORB_VERSION: ${{ inputs.orb_version }}
         ORB_BINARY_PATH: ${{ inputs.orb_binary_path }}
-        GH_TOKEN: ${{ github.token }}
       run: |
         set -euo pipefail
 
@@ -85,33 +83,24 @@ runs:
           # Pre-built binary — for local act testing only
           echo "Using pre-built orb binary: $ORB_BINARY_PATH"
           install -m 755 "$ORB_BINARY_PATH" "$INSTALL_DIR/orb"
+          echo "$INSTALL_DIR" >> "$GITHUB_PATH"
         else
-          OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
-          ARCH="$(uname -m)"
-          case "$ARCH" in
-            x86_64)  ARCH="amd64" ;;
-            aarch64|arm64) ARCH="arm64" ;;
-            *) echo "Unsupported architecture: $ARCH"; exit 1 ;;
-          esac
-
-          if [ "$ORB_VERSION" = "latest" ]; then
-            ORB_VERSION="$(gh release list --repo augur-ai/augur-jobs --limit 1 --json tagName --jq '.[0].tagName')"
+          if ! command -v brew &>/dev/null; then
+            echo "Homebrew is required but not installed or not in PATH"
+            exit 1
           fi
 
-          ASSET="orb_${ORB_VERSION#v}_${OS}_${ARCH}.tar.gz"
-          echo "Downloading orb ${ORB_VERSION} (${OS}/${ARCH}) via gh release download..."
-          gh release download "${ORB_VERSION}" \
-            --repo augur-ai/augur-jobs \
-            --pattern "$ASSET" \
-            --output /tmp/orb.tar.gz
-          tar -xzf /tmp/orb.tar.gz -C /tmp
-          install -m 755 /tmp/orb "$INSTALL_DIR/orb"
+          echo "Installing orb via Homebrew tap augur-ai/tap..."
+          brew tap augur-ai/tap
+          brew install augur-ai/tap/orb
+
+          # Ensure Homebrew bin is on PATH for subsequent steps
+          BREW_PREFIX="$(brew --prefix)"
+          echo "$BREW_PREFIX/bin" >> "$GITHUB_PATH"
         fi
 
-        # Running orb once extracts embedded MCP binaries to ~/.orb/bin/
-        "$INSTALL_DIR/orb" --version
-        echo "$INSTALL_DIR" >> "$GITHUB_PATH"
-        echo "orb installed: $("$INSTALL_DIR/orb" --version)"
+        orb --version
+        echo "orb installed: $(orb --version)"
 
     # ─────────────────────────────────────────────
     # Step 1b: Authenticate orb
@@ -119,9 +108,9 @@ runs:
     - name: Authenticate orb
       shell: bash
       env:
-        ORB_API_TOKEN: ${{ env.ORB_API_TOKEN || env.GITX_API_TOKEN }}
+        ORB_API_TOKEN: ${{ env.ORB_API_TOKEN }}
       run: |
-        BACKEND_URL="${ORB_BACKEND_URL:-${GITX_BACKEND_URL:-https://app.getaugur.ai}}"
+        BACKEND_URL="${ORB_BACKEND_URL:-https://app.getaugur.ai}"
         orb auth login --backend "$BACKEND_URL"
 
     # ─────────────────────────────────────────────
@@ -138,10 +127,10 @@ runs:
     - name: Start orb gateway
       shell: bash
       env:
-        ORB_API_TOKEN: ${{ env.ORB_API_TOKEN || env.GITX_API_TOKEN }}
+        ORB_API_TOKEN: ${{ env.ORB_API_TOKEN }}
         ORB_PROJECT_ROOT: ${{ github.workspace }}/${{ inputs.working_directory }}
       run: |
-        BACKEND_URL="${ORB_BACKEND_URL:-${GITX_BACKEND_URL:-https://app.getaugur.ai}}"
+        BACKEND_URL="${ORB_BACKEND_URL:-https://app.getaugur.ai}"
         orb gateway start --background --backend-url "$BACKEND_URL"
         for i in $(seq 1 15); do
           if curl -s -o /dev/null --connect-timeout 2 http://localhost:8788/_gittrace/session/bind 2>/dev/null; then
@@ -158,7 +147,7 @@ runs:
       id: run-procedure
       shell: bash
       env:
-        ORB_API_TOKEN: ${{ env.ORB_API_TOKEN || env.GITX_API_TOKEN }}
+        ORB_API_TOKEN: ${{ env.ORB_API_TOKEN }}
         ORB_PROJECT_ROOT: ${{ github.workspace }}/${{ inputs.working_directory }}
       run: |
         set -euo pipefail
@@ -192,7 +181,7 @@ runs:
         echo "Prompt length: $(wc -c < "$PROMPT_FILE") bytes"
 
         # Print live run URL after session bind (--print-prompt registers session with gateway)
-        BACKEND_URL="${ORB_BACKEND_URL:-${GITX_BACKEND_URL:-https://app.getaugur.ai}}"
+        BACKEND_URL="${ORB_BACKEND_URL:-https://app.getaugur.ai}"
         LIVE_URL="${BACKEND_URL}/workflow-run?session_id=${SESSION_ID}"
         echo ""
         echo "::notice title=Live Run::${LIVE_URL}"
@@ -296,8 +285,8 @@ runs:
         ANTHROPIC_BASE_URL: http://localhost:8787
         ORB_SESSION_ID: ${{ steps.run-procedure.outputs.session_id }}
         ORB_PROJECT_ROOT: ${{ github.workspace }}/${{ inputs.working_directory }}
-        ORB_API_TOKEN: ${{ env.ORB_API_TOKEN || env.GITX_API_TOKEN }}
-        ORB_BACKEND_URL: ${{ env.ORB_BACKEND_URL || env.GITX_BACKEND_URL || 'https://app.getaugur.ai' }}
+        ORB_API_TOKEN: ${{ env.ORB_API_TOKEN }}
+        ORB_BACKEND_URL: ${{ env.ORB_BACKEND_URL || 'https://app.getaugur.ai' }}
       run: |
         set -euo pipefail
 

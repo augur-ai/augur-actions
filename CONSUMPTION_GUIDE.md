@@ -9,8 +9,8 @@ Add these to your repository (`Settings` → `Secrets and variables` → `Action
 | Secret | Required | Description |
 |--------|----------|-------------|
 | `ANTHROPIC_API_KEY` | Yes | Anthropic API key for Claude |
-| `ORB_API_TOKEN` | Yes | orb registry API token (or use `GITX_API_TOKEN` for backward compatibility) |
-| `ORB_BACKEND_URL` | No | orb backend URL — defaults to `https://app.getaugur.ai` (or use `GITX_BACKEND_URL`) |
+| `ORB_API_TOKEN` | Yes | orb registry API token |
+| `ORB_BACKEND_URL` | No | orb backend URL — defaults to `https://app.getaugur.ai` |
 
 ### 2. Add a workflow
 
@@ -84,7 +84,7 @@ jobs:
 
 ## Live Log UI
 
-When `ORB_BACKEND_URL` (or `GITX_BACKEND_URL`) is set, the action prints a clickable link after session bind:
+When `ORB_BACKEND_URL` is set (or left as default), the action prints a clickable link after session bind:
 
 ```
 📊 Live run: https://your-backend/workflow-run?session_id=<id>
