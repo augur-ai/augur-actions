@@ -131,8 +131,22 @@ runs:
       env:
         ORB_API_TOKEN: ${{ env.ORB_API_TOKEN }}
       run: |
+        set -euo pipefail
+
         BACKEND_URL="${ORB_BACKEND_URL:-https://app.getaugur.ai}"
-        orb auth login --backend "$BACKEND_URL"
+
+        echo "🔐 Resolving identity from ORB_API_TOKEN against $BACKEND_URL..."
+        if orb auth login --backend "$BACKEND_URL"; then
+          echo "✅ orb auth login succeeded"
+        else
+          if [ "${ACT:-false}" = "true" ]; then
+            echo "⚠️ orb auth login failed under nektos/act (ACT=true)."
+            echo "   Continuing in local/offline mode — backend-dependent features (live log, team memory) will be unavailable."
+            exit 0
+          fi
+          echo "❌ orb auth login failed and ACT is not true — failing CI run."
+          exit 1
+        fi
 
     # ─────────────────────────────────────────────
     # Step 1c: Initialize orb (extracts MCPs, writes Claude hooks)
