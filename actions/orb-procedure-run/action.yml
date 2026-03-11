@@ -153,7 +153,21 @@ runs:
     # ─────────────────────────────────────────────
     - name: Initialize orb
       shell: bash
-      run: orb init --skip-index --no-browser --no-report --agents=claude
+      run: |
+        set -euo pipefail
+
+        echo "🚀 Initializing orb (agents=claude)..."
+        if orb init --skip-index --no-browser --no-report --agents=claude; then
+          echo "✅ orb init succeeded"
+        else
+          if [ "${ACT:-false}" = "true" ]; then
+            echo "⚠️ orb init failed under nektos/act (ACT=true)."
+            echo "   Continuing without backend-linked session; local procedure execution may still be validated."
+            exit 0
+          fi
+          echo "❌ orb init failed and ACT is not true — failing CI run."
+          exit 1
+        fi
 
     # ─────────────────────────────────────────────
     # Step 2: Start orb gateway (must be up before --print-prompt so session
