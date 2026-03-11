@@ -72,22 +72,43 @@ runs:
     - name: Install orb
       shell: bash
       env:
-        ORB_BINARY_PATH: ${{ inputs.orb_binary_path }}
+        INPUT_ORB_BINARY_PATH: ${{ inputs.orb_binary_path }}
       run: |
         set -euo pipefail
 
         INSTALL_DIR="$HOME/.local/bin"
         mkdir -p "$INSTALL_DIR"
 
-        if [ -n "$ORB_BINARY_PATH" ]; then
-          # Pre-built binary — for local act testing only
-          echo "Using pre-built orb binary: $ORB_BINARY_PATH"
-          install -m 755 "$ORB_BINARY_PATH" "$INSTALL_DIR/orb"
+        # Prefer explicit input, then fall back to environment ORB_BINARY_PATH (e.g. from act .env)
+        ORB_BIN="${INPUT_ORB_BINARY_PATH:-${ORB_BINARY_PATH:-}}"
+
+        if [ -n "$ORB_BIN" ]; then
+          echo "Using pre-built orb binary: $ORB_BIN"
+          install -m 755 "$ORB_BIN" "$INSTALL_DIR/orb"
           echo "$INSTALL_DIR" >> "$GITHUB_PATH"
         else
+          OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
+
           if ! command -v brew &>/dev/null; then
-            echo "Homebrew is required but not installed or not in PATH"
-            exit 1
+            echo "Homebrew not found, installing..."
+
+            if [ "$OS" = "linux" ]; then
+              # Install Homebrew (Linuxbrew) non-interactively
+              NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+              if [ -x "/home/linuxbrew/.linuxbrew/bin/brew" ]; then
+                eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+                echo "/home/linuxbrew/.linuxbrew/bin" >> "$GITHUB_PATH"
+              else
+                echo "Linuxbrew installation did not produce /home/linuxbrew/.linuxbrew/bin/brew"
+                exit 1
+              fi
+            else
+              # On macOS runners, brew should normally already be installed.
+              # If it's missing, fail fast with a clear error.
+              echo "Homebrew is required on macOS runners but was not found in PATH"
+              exit 1
+            fi
           fi
 
           echo "Installing orb via Homebrew tap augur-ai/tap..."
