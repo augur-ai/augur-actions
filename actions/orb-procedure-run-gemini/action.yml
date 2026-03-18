@@ -46,13 +46,6 @@ inputs:
     required: false
     default: '.'
 
-  pdf_validate_path:
-    description: |
-      Absolute path to the pdf-validate repo root (contains dist/index.js after npm run build).
-      If set, the pdf_validate MCP server is merged into ~/.gemini/settings.json after orb init.
-    required: false
-    default: ''
-
 outputs:
   session_id:
     description: 'orb session ID for this procedure run'
@@ -154,8 +147,6 @@ runs:
     # ─────────────────────────────────────────────
     - name: Merge pdf_validate MCP (optional)
       shell: bash
-      env:
-        PDF_VALIDATE_PATH: ${{ inputs.pdf_validate_path }}
       run: |
         set -euo pipefail
         if [ -z "${PDF_VALIDATE_PATH:-}" ]; then

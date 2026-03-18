@@ -402,8 +402,12 @@ runs:
         cat "$HOME/.orb/sessions/$ORB_SESSION_ID/tasks.json" 2>/dev/null || echo "(no tasks.json — MCP task tools were NOT called)"
 
         echo ""
-        echo "=== ~/.orb/gateway.log (last 50 lines) ==="
-        tail -50 "$HOME/.orb/gateway.log" 2>/dev/null || echo "(no gateway log)"
+        echo "=== ~/.orb/gateway.log (last 300 lines) ==="
+        tail -300 "$HOME/.orb/gateway.log" 2>/dev/null || echo "(no gateway log)"
+
+        echo ""
+        echo "=== ~/.orb/gateway.log (grep task|relay|EventRelay — task/relay activity) ==="
+        grep -iE 'task|relay|EventRelay' "$HOME/.orb/gateway.log" 2>/dev/null | tail -100 || echo "(no task/relay lines in gateway log)"
 
         echo ""
         echo "=== /tmp/mcp-tasktracker.log (last 50 lines) ==="
