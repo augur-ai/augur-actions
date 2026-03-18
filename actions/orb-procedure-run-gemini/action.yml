@@ -46,6 +46,13 @@ inputs:
     required: false
     default: '.'
 
+  pdf_validate_path:
+    description: |
+      Absolute path to the pdf-validate repo root (contains dist/index.js after npm run build).
+      If set, the pdf_validate MCP server is merged into ~/.gemini/settings.json after orb init.
+    required: false
+    default: ''
+
 outputs:
   session_id:
     description: 'orb session ID for this procedure run'
@@ -141,6 +148,47 @@ runs:
           fi
           echo "orb init failed"; exit 1
         fi
+
+    # ─────────────────────────────────────────────
+    # Step 3b: Merge pdf_validate MCP into ~/.gemini/settings.json (optional)
+    # ─────────────────────────────────────────────
+    - name: Merge pdf_validate MCP (optional)
+      shell: bash
+      env:
+        PDF_VALIDATE_PATH: ${{ inputs.pdf_validate_path }}
+      run: |
+        set -euo pipefail
+        if [ -z "${PDF_VALIDATE_PATH:-}" ]; then
+          echo "pdf_validate_path not set; skipping pdf_validate MCP merge."
+          exit 0
+        fi
+        # Resolve to absolute path
+        ABS_PATH="$(cd "$PDF_VALIDATE_PATH" 2>/dev/null && pwd)" || ABS_PATH="$PDF_VALIDATE_PATH"
+        ENTRY="$ABS_PATH/dist/index.js"
+        if [ ! -f "$ENTRY" ]; then
+          echo "Warning: pdf_validate dist/index.js not found at $ENTRY; procedure may fail if it needs pdf_validate."
+        fi
+        GEMINI_SETTINGS="$HOME/.gemini/settings.json"
+        if [ ! -f "$GEMINI_SETTINGS" ]; then
+          echo "Warning: $GEMINI_SETTINGS not found (orb init may have failed); skipping merge."
+          exit 0
+        fi
+        python3 - "$GEMINI_SETTINGS" "$ENTRY" << 'PYEOF'
+        import json, sys
+        settings_path, entry_path = sys.argv[1], sys.argv[2]
+        with open(settings_path) as f:
+            data = json.load(f)
+        mcp = data.get('mcpServers') or {}
+        mcp['pdf_validate'] = {
+            'command': 'node',
+            'args': [entry_path],
+            'description': 'Validate PDF content against expected key-value pairs'
+        }
+        data['mcpServers'] = mcp
+        with open(settings_path, 'w') as f:
+            json.dump(data, f, indent=2)
+        print('Merged pdf_validate into', settings_path)
+        PYEOF
 
     # ─────────────────────────────────────────────
     # Step 4: Start orb gateway
