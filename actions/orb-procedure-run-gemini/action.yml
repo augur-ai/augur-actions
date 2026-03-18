@@ -1,0 +1,243 @@
+name: 'orb Procedure Run (Gemini)'
+description: 'Run an orb procedure using Gemini CLI as the execution engine'
+author: 'augur-ai'
+
+branding:
+  icon: 'cpu'
+  color: 'blue'
+
+# Secrets: set GOOGLE_API_KEY (or the env var the Gemini CLI expects) in workflow env.
+# Also: ORB_API_TOKEN, optional ORB_BACKEND_URL.
+
+inputs:
+  procedure:
+    description: 'Procedure ID to run (e.g. insurance-provider-e2e-pdf-validate)'
+    required: true
+
+  params:
+    description: |
+      Newline-separated key=value pairs passed as --param flags to orb procedure exec.
+    required: false
+    default: ''
+
+  orb_version:
+    description: 'orb version to install. Defaults to latest.'
+    required: false
+    default: 'latest'
+
+  orb_binary_path:
+    description: 'Path to a pre-built orb binary. If set, skips the download step.'
+    required: false
+    default: ''
+
+  model:
+    description: 'Gemini model to use'
+    required: false
+    default: 'gemini-2.5-pro'
+
+  max_turns:
+    description: 'Maximum number of agentic turns. Leave empty if no limit.'
+    required: false
+    default: ''
+
+  working_directory:
+    description: |
+      Working directory for orb commands. Procedures are loaded from this dir (e.g. .orb/procedures/).
+    required: false
+    default: '.'
+
+outputs:
+  session_id:
+    description: 'orb session ID for this procedure run'
+    value: ${{ steps.run-gemini.outputs.session_id }}
+
+  run_status:
+    description: 'PASS or FAIL from the procedure run'
+    value: ${{ steps.run-gemini.outputs.run_status }}
+
+runs:
+  using: 'composite'
+  steps:
+    # ─────────────────────────────────────────────
+    # Step 1: Install orb binary
+    # ─────────────────────────────────────────────
+    - name: Install orb
+      shell: bash
+      env:
+        INPUT_ORB_BINARY_PATH: ${{ inputs.orb_binary_path }}
+      run: |
+        set -euo pipefail
+
+        INSTALL_DIR="$HOME/.local/bin"
+        mkdir -p "$INSTALL_DIR"
+
+        ORB_BIN="${INPUT_ORB_BINARY_PATH:-${ORB_BINARY_PATH:-}}"
+
+        if [ -n "$ORB_BIN" ]; then
+          echo "Using pre-built orb binary: $ORB_BIN"
+          install -m 755 "$ORB_BIN" "$INSTALL_DIR/orb"
+          echo "$INSTALL_DIR" >> "$GITHUB_PATH"
+        else
+          OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
+
+          if ! command -v brew &>/dev/null; then
+            if [ "$OS" = "linux" ]; then
+              NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+              if [ -x "/home/linuxbrew/.linuxbrew/bin/brew" ]; then
+                eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+                echo "/home/linuxbrew/.linuxbrew/bin" >> "$GITHUB_PATH"
+              else
+                echo "Linuxbrew installation failed"; exit 1
+              fi
+            else
+              echo "Homebrew is required on macOS"; exit 1
+            fi
+          fi
+
+          brew tap augur-ai/tap
+          brew install augur-ai/tap/orb
+          BREW_PREFIX="$(brew --prefix)"
+          echo "$BREW_PREFIX/bin" >> "$GITHUB_PATH"
+        fi
+
+        orb --version
+        echo "orb installed: $(orb --version)"
+
+    # ─────────────────────────────────────────────
+    # Step 2: Authenticate orb
+    # ─────────────────────────────────────────────
+    - name: Authenticate orb
+      shell: bash
+      env:
+        ORB_API_TOKEN: ${{ env.ORB_API_TOKEN }}
+      run: |
+        set -euo pipefail
+        BACKEND_URL="${ORB_BACKEND_URL:-https://app.getaugur.ai}"
+        echo "Resolving identity from ORB_API_TOKEN..."
+        if orb auth login --backend "$BACKEND_URL"; then
+          echo "orb auth login succeeded"
+        else
+          if [ "${ACT:-false}" = "true" ]; then
+            echo "orb auth login failed under act; continuing in offline mode."
+            exit 0
+          fi
+          echo "orb auth login failed"; exit 1
+        fi
+
+    # ─────────────────────────────────────────────
+    # Step 3: Initialize orb for Gemini (writes ~/.gemini/settings.json with MCPs)
+    # ─────────────────────────────────────────────
+    - name: Initialize orb for Gemini
+      shell: bash
+      run: |
+        set -euo pipefail
+        echo "Initializing orb (agents=gemini)..."
+        if orb init --skip-index --no-browser --no-report --agents=gemini; then
+          echo "orb init (gemini) succeeded"
+        else
+          if [ "${ACT:-false}" = "true" ]; then
+            echo "orb init failed under act; continuing."
+            exit 0
+          fi
+          echo "orb init failed"; exit 1
+        fi
+
+    # ─────────────────────────────────────────────
+    # Step 4: Start orb gateway
+    # ─────────────────────────────────────────────
+    - name: Start orb gateway
+      shell: bash
+      env:
+        ORB_API_TOKEN: ${{ env.ORB_API_TOKEN }}
+        ORB_PROJECT_ROOT: ${{ github.workspace }}/${{ inputs.working_directory }}
+      run: |
+        set -euo pipefail
+        BACKEND_URL="${ORB_BACKEND_URL:-https://app.getaugur.ai}"
+        echo "Starting orb gateway..."
+        if orb gateway start --background --backend-url "$BACKEND_URL"; then
+          for i in $(seq 1 15); do
+            if curl -s -o /dev/null --connect-timeout 2 http://localhost:8788/_gittrace/session/bind 2>/dev/null; then
+              echo "Gateway ready on port 8788"; break
+            fi
+            echo "  waiting for gateway... $i/15"; sleep 2
+          done
+        else
+          if [ "${ACT:-false}" = "true" ]; then
+            echo "Gateway failed under act; continuing."
+            exit 0
+          fi
+          echo "Gateway failed to start"; exit 1
+        fi
+
+    # ─────────────────────────────────────────────
+    # Step 5: Install Gemini CLI
+    # ─────────────────────────────────────────────
+    - name: Install Gemini CLI
+      shell: bash
+      run: |
+        set -euo pipefail
+        if command -v gemini &>/dev/null; then
+          echo "Gemini CLI already installed: $(gemini --version 2>/dev/null || true)"
+        else
+          npm install -g @google/gemini-cli 2>/dev/null || true
+          if ! command -v gemini &>/dev/null; then
+            echo "Gemini CLI not found on PATH after npm install -g @google/gemini-cli"
+            echo "Ensure GOOGLE_API_KEY is set for the run."
+          else
+            echo "Gemini CLI installed: $(gemini --version 2>/dev/null || true)"
+          fi
+        fi
+
+    # ─────────────────────────────────────────────
+    # Step 6: Run procedure with Gemini
+    # ─────────────────────────────────────────────
+    - name: Run procedure with Gemini
+      id: run-gemini
+      shell: bash
+      env:
+        GOOGLE_API_KEY: ${{ env.GOOGLE_API_KEY }}
+        ORB_API_TOKEN: ${{ env.ORB_API_TOKEN }}
+        ORB_PROJECT_ROOT: ${{ github.workspace }}/${{ inputs.working_directory }}
+      run: |
+        set -euo pipefail
+
+        PROCEDURE="${{ inputs.procedure }}"
+        PARAMS_RAW="${{ inputs.params }}"
+        SESSION_ID="$(python3 -c "import uuid; print(str(uuid.uuid4()))")"
+
+        PARAM_ARGS=()
+        if [ -n "$PARAMS_RAW" ]; then
+          while IFS= read -r line; do
+            line="$(echo "$line" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+            [ -z "$line" ] && continue
+            PARAM_ARGS+=("--param" "$line")
+          done <<< "$PARAMS_RAW"
+        fi
+
+        echo "session_id=$SESSION_ID" >> "$GITHUB_OUTPUT"
+        echo "Running: orb procedure exec $PROCEDURE --provider gemini --session-id $SESSION_ID --gateway-url http://localhost:8787 ${PARAM_ARGS[*]:-}"
+
+        set +e
+        orb procedure exec "$PROCEDURE" \
+          --provider gemini \
+          --session-id "$SESSION_ID" \
+          --gateway-url http://localhost:8787 \
+          "${PARAM_ARGS[@]}"
+        EXIT=$?
+        set -e
+
+        if [ "$EXIT" -eq 0 ]; then
+          echo "run_status=PASS" >> "$GITHUB_OUTPUT"
+        else
+          echo "run_status=FAIL" >> "$GITHUB_OUTPUT"
+        fi
+
+        exit $EXIT
+
+    # ─────────────────────────────────────────────
+    # Step 7: Stop gateway (best-effort)
+    # ─────────────────────────────────────────────
+    - name: Stop orb gateway
+      shell: bash
+      if: always()
+      run: orb gateway stop || true
