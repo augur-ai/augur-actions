@@ -1,5 +1,5 @@
-name: 'orb Procedure Run (Gemini)'
-description: 'Run an orb procedure using Gemini CLI as the execution engine'
+name: 'orb Automation Run (Gemini)'
+description: 'Run an orb automation using Gemini CLI as the execution engine'
 author: 'augur-ai'
 
 branding:
@@ -10,13 +10,13 @@ branding:
 # Also: ORB_API_TOKEN, optional ORB_BACKEND_URL.
 
 inputs:
-  procedure:
-    description: 'Procedure ID to run (e.g. insurance-provider-e2e-pdf-validate)'
+  automation:
+    description: 'Automation ID to run (e.g. insurance-provider-e2e-pdf-validate)'
     required: true
 
   params:
     description: |
-      Newline-separated key=value pairs passed as --param flags to orb procedure exec.
+      Newline-separated key=value pairs passed as --param flags to orb automation exec.
     required: false
     default: ''
 
@@ -42,17 +42,17 @@ inputs:
 
   working_directory:
     description: |
-      Working directory for orb commands. Procedures are loaded from this dir (e.g. .orb/procedures/).
+      Working directory for orb commands. Automations are loaded from this dir (e.g. .orb/procedures/).
     required: false
     default: '.'
 
 outputs:
   session_id:
-    description: 'orb session ID for this procedure run'
+    description: 'orb session ID for this automation run'
     value: ${{ steps.run-gemini.outputs.session_id }}
 
   run_status:
-    description: 'PASS or FAIL from the procedure run'
+    description: 'PASS or FAIL from the automation run'
     value: ${{ steps.run-gemini.outputs.run_status }}
 
 runs:
@@ -157,7 +157,7 @@ runs:
         ABS_PATH="$(cd "$PDF_VALIDATE_PATH" 2>/dev/null && pwd)" || ABS_PATH="$PDF_VALIDATE_PATH"
         ENTRY="$ABS_PATH/dist/index.js"
         if [ ! -f "$ENTRY" ]; then
-          echo "Warning: pdf_validate dist/index.js not found at $ENTRY; procedure may fail if it needs pdf_validate."
+          echo "Warning: pdf_validate dist/index.js not found at $ENTRY; automation may fail if it needs pdf_validate."
         fi
         GEMINI_SETTINGS="$HOME/.gemini/settings.json"
         if [ ! -f "$GEMINI_SETTINGS" ]; then
@@ -228,9 +228,9 @@ runs:
         fi
 
     # ─────────────────────────────────────────────
-    # Step 6: Run procedure with Gemini
+    # Step 6: Run automation with Gemini
     # ─────────────────────────────────────────────
-    - name: Run procedure with Gemini
+    - name: Run automation with Gemini
       id: run-gemini
       shell: bash
       env:
@@ -240,7 +240,7 @@ runs:
       run: |
         set -euo pipefail
 
-        PROCEDURE="${{ inputs.procedure }}"
+        AUTOMATION="${{ inputs.automation }}"
         PARAMS_RAW="${{ inputs.params }}"
         SESSION_ID="$(python3 -c "import uuid; print(str(uuid.uuid4()))")"
 
@@ -254,10 +254,10 @@ runs:
         fi
 
         echo "session_id=$SESSION_ID" >> "$GITHUB_OUTPUT"
-        echo "Running: orb procedure exec $PROCEDURE --provider gemini --session-id $SESSION_ID --gateway-url http://localhost:8787 ${PARAM_ARGS[*]:-}"
+        echo "Running: orb automation exec $AUTOMATION --provider gemini --session-id $SESSION_ID --gateway-url http://localhost:8787 ${PARAM_ARGS[*]:-}"
 
         set +e
-        orb procedure exec "$PROCEDURE" \
+        orb automation exec "$AUTOMATION" \
           --provider gemini \
           --session-id "$SESSION_ID" \
           --gateway-url http://localhost:8787 \
