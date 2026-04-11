@@ -1,5 +1,5 @@
-name: 'orb Procedure Run'
-description: 'Run an orb procedure using Claude Code as the execution engine'
+name: 'orb Automation Run'
+description: 'Run an orb automation using Claude Code as the execution engine'
 author: 'augur-ai'
 
 branding:
@@ -12,13 +12,13 @@ branding:
 #   ORB_BACKEND_URL    — orb backend URL (defaults to https://app.getaugur.ai)
 
 inputs:
-  procedure:
-    description: 'Procedure ID to run (e.g. todo-app-ci, gha-error-triage-and-fix)'
+  automation:
+    description: 'Automation ID to run (e.g. todo-app-ci, gha-error-triage-and-fix)'
     required: true
 
   params:
     description: |
-      Newline-separated key=value pairs passed as --param flags to orb procedure exec.
+      Newline-separated key=value pairs passed as --param flags to orb automation exec.
       Example:
         repo_path=/home/runner/work/myapp/myapp
         node_version=20
@@ -50,17 +50,17 @@ inputs:
   working_directory:
     description: |
       Working directory for orb commands. Defaults to the workspace root.
-      Set this for monorepos where the procedure lives in a subdirectory.
+      Set this for monorepos where the automation lives in a subdirectory.
     required: false
     default: '.'
 
 outputs:
   session_id:
-    description: 'orb session ID for this procedure run'
-    value: ${{ steps.run-procedure.outputs.session_id }}
+    description: 'orb session ID for this automation run'
+    value: ${{ steps.run-automation.outputs.session_id }}
 
   run_status:
-    description: 'PASS or FAIL from the procedure final report'
+    description: 'PASS or FAIL from the automation final report'
     value: ${{ steps.run-claude.outputs.run_status }}
 
 runs:
@@ -205,8 +205,8 @@ runs:
     # Step 3: Build the exec prompt (no Claude yet)
     #          Gateway must be running so session bind succeeds here.
     # ─────────────────────────────────────────────
-    - name: Build procedure exec prompt
-      id: run-procedure
+    - name: Build automation exec prompt
+      id: run-automation
       shell: bash
       env:
         ORB_API_TOKEN: ${{ env.ORB_API_TOKEN }}
@@ -214,7 +214,7 @@ runs:
       run: |
         set -euo pipefail
 
-        PROCEDURE="${{ inputs.procedure }}"
+        AUTOMATION="${{ inputs.automation }}"
         PARAMS_RAW="${{ inputs.params }}"
         SESSION_ID="$(python3 -c "import uuid; print(str(uuid.uuid4()))")"
 
@@ -230,8 +230,8 @@ runs:
 
         PROMPT_FILE="/tmp/orb-exec-prompt.txt"
 
-        echo "Running: orb procedure exec $PROCEDURE --print-prompt --session-id $SESSION_ID ${PARAM_ARGS[*]:-}"
-        orb procedure exec "$PROCEDURE" \
+        echo "Running: orb automation exec $AUTOMATION --print-prompt --session-id $SESSION_ID ${PARAM_ARGS[*]:-}"
+        orb automation exec "$AUTOMATION" \
           --print-prompt \
           --session-id "$SESSION_ID" \
           "${PARAM_ARGS[@]}" \
@@ -239,7 +239,7 @@ runs:
 
         echo "session_id=$SESSION_ID" >> "$GITHUB_OUTPUT"
         echo "prompt_file=$PROMPT_FILE" >> "$GITHUB_OUTPUT"
-        echo "Procedure plan saved. Session: $SESSION_ID"
+        echo "Automation plan saved. Session: $SESSION_ID"
         echo "Prompt length: $(wc -c < "$PROMPT_FILE") bytes"
 
         # Print live run URL after session bind (--print-prompt registers session with gateway)
@@ -345,17 +345,17 @@ runs:
         # Route all Claude API calls through the orb gateway so tool events
         # are relayed to the backend and appear in the Live Log UI.
         ANTHROPIC_BASE_URL: http://localhost:8787
-        ORB_SESSION_ID: ${{ steps.run-procedure.outputs.session_id }}
+        ORB_SESSION_ID: ${{ steps.run-automation.outputs.session_id }}
         ORB_PROJECT_ROOT: ${{ github.workspace }}/${{ inputs.working_directory }}
         ORB_API_TOKEN: ${{ env.ORB_API_TOKEN }}
         ORB_BACKEND_URL: ${{ env.ORB_BACKEND_URL || 'https://app.getaugur.ai' }}
       run: |
         set -euo pipefail
 
-        SESSION_ID="${{ steps.run-procedure.outputs.session_id }}"
+        SESSION_ID="${{ steps.run-automation.outputs.session_id }}"
         MODEL="${{ inputs.model }}"
         MAX_TURNS="${{ inputs.max_turns }}"
-        PROMPT_FILE="${{ steps.run-procedure.outputs.prompt_file }}"
+        PROMPT_FILE="${{ steps.run-automation.outputs.prompt_file }}"
 
         # Build optional flags
         EXTRA_ARGS=()
@@ -392,7 +392,7 @@ runs:
       shell: bash
       if: always()
       env:
-        ORB_SESSION_ID: ${{ steps.run-procedure.outputs.session_id }}
+        ORB_SESSION_ID: ${{ steps.run-automation.outputs.session_id }}
       run: |
         echo "=== /tmp/orb-claude.log (last 300 lines) ==="
         tail -300 /tmp/orb-claude.log 2>/dev/null || echo "(no log)"
