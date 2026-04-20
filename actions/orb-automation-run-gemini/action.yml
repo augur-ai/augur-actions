@@ -46,6 +46,24 @@ inputs:
     required: false
     default: '.'
 
+  self_heal:
+    description: |
+      Enable orb's native self-heal loop. 'true' or 'false'. When enabled,
+      orb retries failing tasks after giving the agent a chance to diagnose
+      and patch (e.g. locator changes). Mirrors orb/run-todo-e2e-gemini.sh.
+    required: false
+    default: 'false'
+
+  self_heal_strategy:
+    description: "Self-heal strategy. Currently only 'fix_and_rerun' is supported."
+    required: false
+    default: 'fix_and_rerun'
+
+  self_heal_max_attempts:
+    description: 'Max self-heal attempts per task before giving up.'
+    required: false
+    default: '1'
+
 outputs:
   session_id:
     description: 'orb session ID for this automation run'
@@ -253,14 +271,30 @@ runs:
           done <<< "$PARAMS_RAW"
         fi
 
+        # Self-heal flags (matches orb/run-todo-e2e-gemini.sh). These
+        # enable orb's NATIVE retry-with-diagnosis loop — the JSON
+        # automation cannot trigger heal on its own; it must be passed
+        # here as a runtime flag to `orb automation exec`.
+        HEAL_ARGS=()
+        if [ "${{ inputs.self_heal }}" = "true" ]; then
+          HEAL_ARGS+=(
+            --self-heal=true
+            --self-heal-strategy "${{ inputs.self_heal_strategy }}"
+            --self-heal-max-attempts "${{ inputs.self_heal_max_attempts }}"
+          )
+        else
+          HEAL_ARGS+=(--self-heal=false)
+        fi
+
         echo "session_id=$SESSION_ID" >> "$GITHUB_OUTPUT"
-        echo "Running: orb automation exec $AUTOMATION --provider gemini --session-id $SESSION_ID --gateway-url http://localhost:8787 ${PARAM_ARGS[*]:-}"
+        echo "Running: orb automation exec $AUTOMATION --provider gemini --session-id $SESSION_ID --gateway-url http://localhost:8787 ${HEAL_ARGS[*]} ${PARAM_ARGS[*]:-}"
 
         set +e
         orb automation exec "$AUTOMATION" \
           --provider gemini \
           --session-id "$SESSION_ID" \
           --gateway-url http://localhost:8787 \
+          "${HEAL_ARGS[@]}" \
           "${PARAM_ARGS[@]}"
         EXIT=$?
         set -e
