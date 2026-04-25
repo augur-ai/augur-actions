@@ -1,0 +1,288 @@
+name: 'Augur Upstream Drift Run'
+description: 'Detect API contract drift between two refs and report it to Augur Release Monitor'
+author: 'augur-ai'
+
+branding:
+  icon: 'git-branch'
+  color: 'orange'
+
+# Required env vars (read from workflow / repo secrets):
+#   AUGUR_TOKEN     — Augur API token (Bearer)
+#   AUGUR_ORG_ID    — Augur org id this run belongs to
+#
+# Optional env vars:
+#   AUGUR_BACKEND_URL  — Augur backend origin (default https://app.getaugur.ai)
+
+inputs:
+  repo:
+    description: 'owner/name of the repository being monitored. Defaults to ${{ github.repository }}.'
+    required: false
+    default: ${{ github.repository }}
+
+  target_ref:
+    description: |
+      Target ref the diff is computed *to* (e.g. PR head SHA, release tag, branch).
+      Pair with target_kind so the backend can render labels.
+    required: true
+
+  target_kind:
+    description: '"branch" | "commit" | "release" | "pr". Forwarded to backend run config.'
+    required: false
+    default: 'commit'
+
+  baseline_ref:
+    description: 'Baseline ref the diff is computed *from* (e.g. main, last release tag, base SHA).'
+    required: true
+
+  baseline_kind:
+    description: '"branch" | "commit" | "release" | "main". Forwarded to backend run config.'
+    required: false
+    default: 'main'
+
+  focus_areas:
+    description: 'Comma-separated subset of: rest_api, ui, playwright, code. Defaults to rest_api.'
+    required: false
+    default: 'rest_api'
+
+  spec_path:
+    description: 'Path to OpenAPI spec relative to repo root. Required for rest_api focus.'
+    required: false
+    default: 'openapi.json'
+
+  oasdiff_version:
+    description: 'oasdiff release tag to install (e.g. v1.10.30). Defaults to latest.'
+    required: false
+    default: 'latest'
+
+outputs:
+  run_id:
+    description: 'Drift run id created on the Augur backend'
+    value: ${{ steps.mint-run.outputs.run_id }}
+
+  run_url:
+    description: 'Direct link to the run detail page in Augur UI'
+    value: ${{ steps.mint-run.outputs.run_url }}
+
+  items_count:
+    description: 'Number of drift items the action POSTed back'
+    value: ${{ steps.report.outputs.items_count }}
+
+runs:
+  using: 'composite'
+  steps:
+    # ─────────────────────────────────────────────
+    # Step 1: Sanity-check inputs + env
+    # ─────────────────────────────────────────────
+    - name: Preflight
+      shell: bash
+      run: |
+        set -euo pipefail
+        : "${AUGUR_TOKEN:?AUGUR_TOKEN env var is required}"
+        : "${AUGUR_ORG_ID:?AUGUR_ORG_ID env var is required}"
+        BACKEND_URL="${AUGUR_BACKEND_URL:-https://app.getaugur.ai}"
+        echo "Augur backend: $BACKEND_URL"
+        echo "Org:           $AUGUR_ORG_ID"
+        echo "Repo:          ${{ inputs.repo }}"
+        echo "Target:        ${{ inputs.target_kind }} / ${{ inputs.target_ref }}"
+        echo "Baseline:      ${{ inputs.baseline_kind }} / ${{ inputs.baseline_ref }}"
+        echo "Focus areas:   ${{ inputs.focus_areas }}"
+
+    # ─────────────────────────────────────────────
+    # Step 2: Install oasdiff (single static binary)
+    # ─────────────────────────────────────────────
+    - name: Install oasdiff
+      shell: bash
+      env:
+        OASDIFF_VERSION: ${{ inputs.oasdiff_version }}
+      run: |
+        set -euo pipefail
+        if command -v oasdiff &>/dev/null; then
+          echo "oasdiff already installed: $(oasdiff --version 2>&1 | head -1)"
+          exit 0
+        fi
+        OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
+        ARCH="$(uname -m)"
+        case "$ARCH" in
+          x86_64|amd64) ARCH=amd64 ;;
+          arm64|aarch64) ARCH=arm64 ;;
+          *) echo "Unsupported arch: $ARCH"; exit 1 ;;
+        esac
+        TAG="${OASDIFF_VERSION}"
+        if [ "$TAG" = "latest" ]; then
+          TAG=$(curl -fsSL https://api.github.com/repos/oasdiff/oasdiff/releases/latest | grep -oE '"tag_name":\s*"[^"]+"' | head -1 | cut -d'"' -f4)
+        fi
+        echo "Installing oasdiff $TAG for $OS/$ARCH"
+        TARBALL="oasdiff_${TAG#v}_${OS}_${ARCH}.tar.gz"
+        URL="https://github.com/oasdiff/oasdiff/releases/download/${TAG}/${TARBALL}"
+        curl -fsSL "$URL" -o /tmp/oasdiff.tar.gz
+        tar -xzf /tmp/oasdiff.tar.gz -C /tmp
+        install -m 755 /tmp/oasdiff "$HOME/.local/bin/oasdiff" 2>/dev/null || sudo install -m 755 /tmp/oasdiff /usr/local/bin/oasdiff
+        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+        oasdiff --version
+
+    # ─────────────────────────────────────────────
+    # Step 3: Mint a delegated drift run on the Augur backend
+    #   POST /api/v1/orgs/{org}/release-monitoring/runs
+    #   body: { repo, target, baseline, focus_areas, spec_path, mode: "delegated" }
+    #   response: { id, callback_url, callback_token }
+    # ─────────────────────────────────────────────
+    - name: Mint drift run
+      id: mint-run
+      shell: bash
+      env:
+        AUGUR_TOKEN: ${{ env.AUGUR_TOKEN }}
+        AUGUR_ORG_ID: ${{ env.AUGUR_ORG_ID }}
+      run: |
+        set -euo pipefail
+        BACKEND_URL="${AUGUR_BACKEND_URL:-https://app.getaugur.ai}"
+
+        FOCUS_JSON=$(echo -n "${{ inputs.focus_areas }}" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -v '^$' | jq -R . | jq -sc .)
+
+        BODY=$(jq -nc \
+          --arg repo       '${{ inputs.repo }}' \
+          --arg tk         '${{ inputs.target_kind }}' \
+          --arg tr         '${{ inputs.target_ref }}' \
+          --arg bk         '${{ inputs.baseline_kind }}' \
+          --arg br         '${{ inputs.baseline_ref }}' \
+          --argjson focus  "$FOCUS_JSON" \
+          --arg spec_path  '${{ inputs.spec_path }}' \
+          '{ repo:$repo,
+             target:   {kind:$tk, ref:$tr},
+             baseline: {kind:$bk, ref:$br},
+             focus_areas:$focus,
+             spec_path:$spec_path,
+             mode:"delegated" }')
+
+        echo "POST $BACKEND_URL/api/v1/orgs/$AUGUR_ORG_ID/release-monitoring/runs"
+        RESP=$(curl -fsSL -X POST \
+          -H "Authorization: Bearer $AUGUR_TOKEN" \
+          -H 'content-type: application/json' \
+          -d "$BODY" \
+          "$BACKEND_URL/api/v1/orgs/$AUGUR_ORG_ID/release-monitoring/runs")
+
+        RUN_ID=$(echo "$RESP" | jq -r '.id')
+        CALLBACK_URL=$(echo "$RESP" | jq -r '.callback_url')
+        CALLBACK_TOKEN=$(echo "$RESP" | jq -r '.callback_token')
+
+        if [ -z "$RUN_ID" ] || [ "$RUN_ID" = "null" ]; then
+          echo "Failed to mint run. Response:"; echo "$RESP"; exit 1
+        fi
+
+        # Pass forward via outputs (not exposed) and env (consumed by next steps).
+        echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+        echo "run_url=$BACKEND_URL/release-monitoring/runs/$RUN_ID" >> "$GITHUB_OUTPUT"
+        echo "AUGUR_RUN_ID=$RUN_ID" >> "$GITHUB_ENV"
+        echo "AUGUR_CALLBACK_URL=$CALLBACK_URL" >> "$GITHUB_ENV"
+        # Mask the token in logs.
+        echo "::add-mask::$CALLBACK_TOKEN"
+        echo "AUGUR_CALLBACK_TOKEN=$CALLBACK_TOKEN" >> "$GITHUB_ENV"
+
+        echo "::notice title=Augur run::$BACKEND_URL/release-monitoring/runs/$RUN_ID"
+
+    # ─────────────────────────────────────────────
+    # Step 4: Compute the diff with oasdiff and translate to DriftItem shape
+    #   Customer CI fetches both spec versions itself (cheap when both
+    #   refs are local checkouts) and hands paths to oasdiff. We then
+    #   translate oasdiff's changelog JSON to Augur's DriftItem shape
+    #   so the run-detail page renders identically.
+    # ─────────────────────────────────────────────
+    - name: Compute diff
+      id: compute-diff
+      shell: bash
+      env:
+        BASELINE_SPEC: ${{ github.workspace }}/.augur/baseline.${{ inputs.spec_path }}
+        TARGET_SPEC: ${{ github.workspace }}/.augur/target.${{ inputs.spec_path }}
+      run: |
+        set -euo pipefail
+        # The wrapper expects baseline + target spec files already on disk
+        # under .augur/ — caller's workflow checks out both refs and copies
+        # the spec into those paths. See README for the canonical pattern.
+        for f in "$BASELINE_SPEC" "$TARGET_SPEC"; do
+          if [ ! -f "$f" ]; then
+            echo "Missing spec file: $f"
+            echo "Workflow must check out the baseline + target refs and write specs to .augur/"
+            exit 1
+          fi
+        done
+
+        # oasdiff changelog: emits a JSON array of changes with stable shape.
+        oasdiff changelog "$BASELINE_SPEC" "$TARGET_SPEC" --format json > /tmp/oasdiff-out.json || true
+        N=$(jq 'length' /tmp/oasdiff-out.json)
+        echo "oasdiff produced $N changes"
+
+        # Map oasdiff change -> Augur DriftItemResponse shape.
+        # Severity translation:
+        #   "error"   -> "breaking"
+        #   "warning" -> "warning"
+        #   default   -> "info"
+        jq '[ .[] |
+              {
+                id: (.id // (now | tostring)),
+                kind: (if .level == "error" then "removed"
+                       elif .operation == "POST" or .operation == "PUT"
+                            or .operation == "GET" or .operation == "DELETE"
+                            or .operation == "PATCH" then "modified"
+                       else "modified" end),
+                target_type: "api_operation",
+                target_label: ((.operation // "GET") + " " + (.path // .operationId // "(unknown)")),
+                source_label: "oasdiff",
+                summary: (.text // .id // "change"),
+                suggestion: "",
+                affected_tests: [],
+                status: "open",
+                severity: (if .level == "error" then "breaking"
+                           elif .level == "warning" then "warning"
+                           else "info" end)
+              }
+            ]' /tmp/oasdiff-out.json > /tmp/items.json
+
+        echo "items_count=$N" >> "$GITHUB_OUTPUT"
+
+    # ─────────────────────────────────────────────
+    # Step 5: POST items + final to the callback URL
+    # ─────────────────────────────────────────────
+    - name: Report drift items
+      id: report
+      shell: bash
+      run: |
+        set -euo pipefail
+        ITEMS_JSON=$(cat /tmp/items.json)
+        N=$(echo "$ITEMS_JSON" | jq 'length')
+
+        BODY=$(jq -nc \
+          --argjson items "$ITEMS_JSON" \
+          '{ items:$items, final:true,
+             progress: { step:"diff", status:"done",
+                         message:("oasdiff produced " + ($items|length|tostring) + " items") } }')
+
+        echo "POST $AUGUR_CALLBACK_URL"
+        curl -fsSL -X POST \
+          -H "X-Callback-Token: $AUGUR_CALLBACK_TOKEN" \
+          -H 'content-type: application/json' \
+          -d "$BODY" \
+          "$AUGUR_CALLBACK_URL"
+
+        echo "items_count=$N" >> "$GITHUB_OUTPUT"
+        echo "Reported $N drift items"
+
+    # ─────────────────────────────────────────────
+    # Step 6: On failure, POST /callback/fail with the error message
+    # ─────────────────────────────────────────────
+    - name: Report failure
+      if: failure()
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [ -z "${AUGUR_CALLBACK_URL:-}" ] || [ -z "${AUGUR_CALLBACK_TOKEN:-}" ]; then
+          echo "No callback context to fail; nothing to report."
+          exit 0
+        fi
+        FAIL_URL="${AUGUR_CALLBACK_URL}/fail"
+        BODY=$(jq -nc --arg msg "GitHub Action upstream-drift-run failed; see workflow log." \
+          '{ error:$msg,
+             progress: { step:"action", status:"failed", message:$msg } }')
+        curl -fsSL -X POST \
+          -H "X-Callback-Token: $AUGUR_CALLBACK_TOKEN" \
+          -H 'content-type: application/json' \
+          -d "$BODY" \
+          "$FAIL_URL" || true
