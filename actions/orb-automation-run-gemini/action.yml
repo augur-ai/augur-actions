@@ -160,6 +160,7 @@ runs:
       shell: bash
       env:
         ORB_API_TOKEN: ${{ env.ORB_API_TOKEN }}
+        ORB_PROJECT_ID: ${{ env.ORB_PROJECT_ID }}
       run: |
         set -euo pipefail
         BACKEND_URL="${ORB_BACKEND_URL:-https://app.getaugur.ai}"
@@ -239,6 +240,7 @@ runs:
       env:
         ORB_API_TOKEN: ${{ env.ORB_API_TOKEN }}
         ORB_PROJECT_ROOT: ${{ github.workspace }}/${{ inputs.working_directory }}
+        ORB_PROJECT_ID: ${{ env.ORB_PROJECT_ID }}
       run: |
         set -euo pipefail
         BACKEND_URL="${ORB_BACKEND_URL:-https://app.getaugur.ai}"
@@ -324,6 +326,7 @@ runs:
         GOOGLE_API_KEY: ${{ env.GOOGLE_API_KEY }}
         ORB_API_TOKEN: ${{ env.ORB_API_TOKEN }}
         ORB_PROJECT_ROOT: ${{ github.workspace }}/${{ inputs.working_directory }}
+        ORB_PROJECT_ID: ${{ env.ORB_PROJECT_ID }}
       run: |
         set -euo pipefail
 

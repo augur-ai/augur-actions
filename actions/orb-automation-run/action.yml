@@ -130,6 +130,7 @@ runs:
       shell: bash
       env:
         ORB_API_TOKEN: ${{ env.ORB_API_TOKEN }}
+        ORB_PROJECT_ID: ${{ env.ORB_PROJECT_ID }}
       run: |
         set -euo pipefail
 
@@ -178,6 +179,7 @@ runs:
       env:
         ORB_API_TOKEN: ${{ env.ORB_API_TOKEN }}
         ORB_PROJECT_ROOT: ${{ github.workspace }}/${{ inputs.working_directory }}
+        ORB_PROJECT_ID: ${{ env.ORB_PROJECT_ID }}
       run: |
         set -euo pipefail
 
@@ -211,6 +213,7 @@ runs:
       env:
         ORB_API_TOKEN: ${{ env.ORB_API_TOKEN }}
         ORB_PROJECT_ROOT: ${{ github.workspace }}/${{ inputs.working_directory }}
+        ORB_PROJECT_ID: ${{ env.ORB_PROJECT_ID }}
       run: |
         set -euo pipefail
 
@@ -349,6 +352,7 @@ runs:
         ORB_PROJECT_ROOT: ${{ github.workspace }}/${{ inputs.working_directory }}
         ORB_API_TOKEN: ${{ env.ORB_API_TOKEN }}
         ORB_BACKEND_URL: ${{ env.ORB_BACKEND_URL || 'https://app.getaugur.ai' }}
+        ORB_PROJECT_ID: ${{ env.ORB_PROJECT_ID }}
       run: |
         set -euo pipefail
 
