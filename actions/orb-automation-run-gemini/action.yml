@@ -160,6 +160,17 @@ runs:
       shell: bash
       env:
         ORB_API_TOKEN: ${{ env.ORB_API_TOKEN }}
+        # Forward the per-tenant context so spawned `orb` processes
+        # (auth login, gateway, automation exec, MCP servers) attach the
+        # right X-Org-ID + X-Project-ID headers on every relay POST.
+        # memory-service `require_project_id` rejects the /trace/artifacts
+        # list with 400 when X-Project-ID is missing, which silently
+        # breaks verify_task_artifacts even after a green Playwright run.
+        # ORB_BACKEND_URL / ORB_PROPELAUTH_* are NOT forwarded — those
+        # have binary defaults baked into orb that point at the
+        # production registry.
+        ORB_ORG_ID: ${{ env.ORB_ORG_ID }}
+        ORB_PROJECT_ID: ${{ env.ORB_PROJECT_ID }}
       run: |
         set -euo pipefail
         BACKEND_URL="${ORB_BACKEND_URL:-https://app.getaugur.ai}"
@@ -239,6 +250,12 @@ runs:
       env:
         ORB_API_TOKEN: ${{ env.ORB_API_TOKEN }}
         ORB_PROJECT_ROOT: ${{ github.workspace }}/${{ inputs.working_directory }}
+        # See "Authenticate orb" step above — same per-tenant context
+        # needs to flow to the gateway daemon and orb procedure exec
+        # so MCP servers (mcp-tasktracker, mcp-memory) attach
+        # X-Project-ID on every backend call.
+        ORB_ORG_ID: ${{ env.ORB_ORG_ID }}
+        ORB_PROJECT_ID: ${{ env.ORB_PROJECT_ID }}
       run: |
         set -euo pipefail
         BACKEND_URL="${ORB_BACKEND_URL:-https://app.getaugur.ai}"
@@ -324,6 +341,12 @@ runs:
         GOOGLE_API_KEY: ${{ env.GOOGLE_API_KEY }}
         ORB_API_TOKEN: ${{ env.ORB_API_TOKEN }}
         ORB_PROJECT_ROOT: ${{ github.workspace }}/${{ inputs.working_directory }}
+        # See "Authenticate orb" step above — same per-tenant context
+        # needs to flow to the gateway daemon and orb procedure exec
+        # so MCP servers (mcp-tasktracker, mcp-memory) attach
+        # X-Project-ID on every backend call.
+        ORB_ORG_ID: ${{ env.ORB_ORG_ID }}
+        ORB_PROJECT_ID: ${{ env.ORB_PROJECT_ID }}
       run: |
         set -euo pipefail
 

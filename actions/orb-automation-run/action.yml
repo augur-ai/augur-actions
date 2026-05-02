@@ -130,6 +130,13 @@ runs:
       shell: bash
       env:
         ORB_API_TOKEN: ${{ env.ORB_API_TOKEN }}
+        # Per-tenant context — flows to spawned `orb` processes so MCP
+        # servers attach X-Org-ID + X-Project-ID on every relay POST.
+        # memory-service /trace/artifacts (require_project_id) returns
+        # 400 without these. ORB_BACKEND_URL / ORB_PROPELAUTH_* are NOT
+        # forwarded — orb binary defaults point at the prod registry.
+        ORB_ORG_ID: ${{ env.ORB_ORG_ID }}
+        ORB_PROJECT_ID: ${{ env.ORB_PROJECT_ID }}
       run: |
         set -euo pipefail
 
@@ -178,6 +185,10 @@ runs:
       env:
         ORB_API_TOKEN: ${{ env.ORB_API_TOKEN }}
         ORB_PROJECT_ROOT: ${{ github.workspace }}/${{ inputs.working_directory }}
+        # See "Authenticate orb" — same per-tenant context flows to
+        # gateway daemon + procedure exec so MCPs attach X-Project-ID.
+        ORB_ORG_ID: ${{ env.ORB_ORG_ID }}
+        ORB_PROJECT_ID: ${{ env.ORB_PROJECT_ID }}
       run: |
         set -euo pipefail
 
@@ -211,6 +222,10 @@ runs:
       env:
         ORB_API_TOKEN: ${{ env.ORB_API_TOKEN }}
         ORB_PROJECT_ROOT: ${{ github.workspace }}/${{ inputs.working_directory }}
+        # See "Authenticate orb" — same per-tenant context flows to
+        # gateway daemon + procedure exec so MCPs attach X-Project-ID.
+        ORB_ORG_ID: ${{ env.ORB_ORG_ID }}
+        ORB_PROJECT_ID: ${{ env.ORB_PROJECT_ID }}
       run: |
         set -euo pipefail
 
@@ -349,6 +364,9 @@ runs:
         ORB_PROJECT_ROOT: ${{ github.workspace }}/${{ inputs.working_directory }}
         ORB_API_TOKEN: ${{ env.ORB_API_TOKEN }}
         ORB_BACKEND_URL: ${{ env.ORB_BACKEND_URL || 'https://app.getaugur.ai' }}
+        # Per-tenant context — Claude → orb gateway → relay POSTs.
+        ORB_ORG_ID: ${{ env.ORB_ORG_ID }}
+        ORB_PROJECT_ID: ${{ env.ORB_PROJECT_ID }}
       run: |
         set -euo pipefail
 
