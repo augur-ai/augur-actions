@@ -128,6 +128,59 @@ runs:
         echo "orb installed: $($ORB_CMD --version)"
 
     # ─────────────────────────────────────────────
+    # Step 1b: Install Codex CLI (npm global)
+    #
+    # `orb automation exec --provider codex` spawns the `codex` CLI as a
+    # child. On a fresh GHA runner that binary is NOT preinstalled, so
+    # the spawn fails immediately and orb reports "0/2 tasks successful,
+    # 2 incomplete" within ~300ms — looks identical to a narration-only
+    # run, but the actual cause is "command not found". Mirrors the
+    # Setup-Gemini-CLI step in the gemini action.
+    # ─────────────────────────────────────────────
+    - name: Resolve npm prefix
+      id: npm-prefix-codex
+      shell: bash
+      run: |
+        set -euo pipefail
+        PREFIX="$(npm config get prefix)"
+        echo "prefix=$PREFIX" >> "$GITHUB_OUTPUT"
+
+    - name: Cache Codex CLI
+      id: cache-codex
+      uses: actions/cache@v4
+      with:
+        path: |
+          ${{ steps.npm-prefix-codex.outputs.prefix }}/lib/node_modules/@openai/codex
+          ${{ steps.npm-prefix-codex.outputs.prefix }}/bin/codex
+        key: codex-cli-${{ runner.os }}-${{ runner.arch }}-v1
+
+    - name: Install Codex CLI
+      if: steps.cache-codex.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        if command -v codex &>/dev/null; then
+          echo "Codex CLI already installed: $(codex --version 2>/dev/null || true)"
+        else
+          npm install -g @openai/codex 2>/dev/null || true
+          if ! command -v codex &>/dev/null; then
+            echo "Codex CLI not found on PATH after npm install -g @openai/codex"
+            echo "Ensure OPENAI_API_KEY is set for the run."
+          else
+            echo "Codex CLI installed: $(codex --version 2>/dev/null || true)"
+          fi
+        fi
+
+    - name: Verify Codex CLI
+      shell: bash
+      run: |
+        set -euo pipefail
+        if ! command -v codex &>/dev/null; then
+          echo "codex not found on PATH after install/cache restore"; exit 1
+        fi
+        echo "codex: $(codex --version 2>/dev/null || true)"
+
+    # ─────────────────────────────────────────────
     # Step 2: Authenticate orb
     # ─────────────────────────────────────────────
     - name: Authenticate orb

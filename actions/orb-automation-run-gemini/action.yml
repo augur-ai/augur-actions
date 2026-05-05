@@ -207,23 +207,6 @@ runs:
           echo "orb init failed"; exit 1
         fi
 
-        # Tool name format guidance — Gemini's MCP wrapper registers tools
-        # as `mcp_<server>_<tool>` (single underscore), but orb's docs/skills
-        # reference `mcp__<server>__<tool>` (Claude convention, double
-        # underscore). The model trains on the docs and tries the wrong
-        # name → "Tool not found" loop → procedure stalls. Append explicit
-        # guidance to each agent file so the model translates correctly.
-        for f in "$HOME"/.gemini/agents/*.md; do
-          [ -f "$f" ] || continue
-          if ! grep -q "single-underscore" "$f"; then
-            cat >> "$f" <<'GEMINI_TOOL_NOTE'
-
-**CRITICAL — tool name format.** All MCP tools in this environment are registered with single-underscore names: `mcp_tasktracker_update_task`, `mcp_tasktracker_get_tasks`, `mcp_tasktracker_upload_artifact`, `mcp_tasktracker_verify_task_artifacts`, `mcp_automationtracer_record_step`, etc. Do NOT call `mcp__tasktracker__update_task` (double underscore — Claude convention) — Gemini's MCP wrapper does not register that variant. If the docs/system text refer to `mcp__X__Y`, translate to `mcp_X_Y` (single underscore) before calling. Bare names without the `mcp_` prefix also do not work.
-GEMINI_TOOL_NOTE
-            echo "── appended tool-name guidance to $f ──"
-          fi
-        done
-
     # ─────────────────────────────────────────────
     # Step 3b: Merge pdf_validate MCP into ~/.gemini/settings.json (optional)
     # ─────────────────────────────────────────────
