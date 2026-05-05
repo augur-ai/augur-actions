@@ -227,22 +227,16 @@ runs:
           echo "orb init failed"; exit 1
         fi
 
-        # Diagnostic + fix: codex CLI silently disables MCP servers that
-        # don't initialize within `startup_timeout_sec` (default 10s). orb
-        # MCP binaries (mcp-tasktracker / mcp-memory / etc.) cold-spawn
-        # slower than 10s in clean GHA runners → tools dropped → codex
-        # turn has zero tool_calls → "narration-only" exit. Inject a 60s
-        # timeout into every [mcp_servers.<name>] block to give them
-        # headroom. Idempotent — re-runs append nothing if already present.
+        # Earlier this step injected `startup_timeout_sec = 60` into every
+        # [mcp_servers.X] block to debug suspected slow-cold-start tool
+        # dropping. The real cause was missing codex CLI (now installed
+        # in Setup Codex CLI step above), and the awk pattern matched
+        # `[mcp_servers.code.env]` too, putting an int in a string-only
+        # env table → "invalid type: integer `60`, expected a string".
+        # Diagnostic kept (cat the config) but injection removed.
         CODEX_CFG="$HOME/.codex/config.toml"
         if [ -f "$CODEX_CFG" ]; then
           echo "── codex config (orb init output) ──"
-          cat "$CODEX_CFG"
-          echo "── injecting startup_timeout_sec=60 ──"
-          if ! grep -q "startup_timeout_sec" "$CODEX_CFG"; then
-            awk '/^\[mcp_servers\./{print; print "startup_timeout_sec = 60"; next}{print}' "$CODEX_CFG" > "$CODEX_CFG.new" && mv "$CODEX_CFG.new" "$CODEX_CFG"
-          fi
-          echo "── codex config (post-injection) ──"
           cat "$CODEX_CFG"
 
         # Codex agent files require `name` and `description` (per
