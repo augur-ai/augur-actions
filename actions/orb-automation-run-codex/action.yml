@@ -31,9 +31,14 @@ inputs:
     default: ''
 
   model:
-    description: 'Codex model to use'
+    description: |
+      Codex model to use. Default is gpt-5.1-codex-mini (cheapest GPT-5
+      that reliably makes tool calls). The legacy default 'o3-mini'
+      drops into "narration-only" turns on procedure prompts (no tool
+      calls → orchestrator exits with all tasks pending). Override via
+      this input — e.g. gpt-5.3-codex for the higher-quality model.
     required: false
-    default: 'o3'
+    default: 'gpt-5.1-codex-mini'
 
   max_turns:
     description: 'Maximum number of agentic turns. Leave empty if no limit.'
@@ -264,6 +269,7 @@ runs:
         set +e
         orb automation exec "$AUTOMATION" \
           --provider codex \
+          --model "${{ inputs.model }}" \
           --session-id "$SESSION_ID" \
           --gateway-url http://localhost:8787 \
           "${PARAM_ARGS[@]}"
