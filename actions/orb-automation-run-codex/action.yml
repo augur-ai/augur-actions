@@ -180,6 +180,28 @@ runs:
         fi
         echo "codex: $(codex --version 2>/dev/null || true)"
 
+    # Codex CLI 0.128+ uses ChatGPT login by default and ignores
+    # OPENAI_API_KEY at exec time unless `codex login --with-api-key`
+    # has registered the key. Without this, `orb automation exec
+    # --provider codex` spawns codex which then 401s at
+    # wss://api.openai.com/v1/responses with "Missing bearer or basic
+    # authentication in header" — symptom looks identical to a wrong
+    # key but the cause is "no api-key login persisted".
+    # See https://developers.openai.com/codex/auth — for CI/CD the
+    # documented method is API-key login via stdin.
+    - name: Login to Codex with API key
+      shell: bash
+      env:
+        OPENAI_API_KEY: ${{ env.OPENAI_API_KEY }}
+      run: |
+        set -euo pipefail
+        if [ -z "${OPENAI_API_KEY:-}" ]; then
+          echo "OPENAI_API_KEY not set — cannot login to Codex CLI"
+          exit 1
+        fi
+        printf '%s' "$OPENAI_API_KEY" | codex login --with-api-key
+        echo "Codex login complete (API key)"
+
     # ─────────────────────────────────────────────
     # Step 2: Authenticate orb
     # ─────────────────────────────────────────────
