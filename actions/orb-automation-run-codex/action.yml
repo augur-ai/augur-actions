@@ -191,6 +191,22 @@ runs:
           fi
           echo "── codex config (post-injection) ──"
           cat "$CODEX_CFG"
+
+        # Codex agent files require `name` and `description` (per
+        # /codex/subagents docs). orb's bundled templates only set
+        # `model` + `developer_instructions`, so codex silently rejects
+        # the agent → orchestrator turn has no agent context → no tools
+        # → "narration-only" exit. Patch the agent files in place to add
+        # the missing required fields. Idempotent.
+        for f in "$HOME"/.codex/agents/*.toml; do
+          [ -f "$f" ] || continue
+          base=$(basename "$f" .toml)
+          if ! grep -q '^name\s*=' "$f"; then
+            { echo "name = \"$base\""; echo "description = \"orb $base\""; cat "$f"; } > "$f.new" && mv "$f.new" "$f"
+            echo "── patched $f with name/description ──"
+            head -5 "$f"
+          fi
+        done
         else
           echo "::warning::$CODEX_CFG not present — orb init may have skipped codex agents wiring"
         fi
