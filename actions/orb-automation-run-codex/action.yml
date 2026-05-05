@@ -268,11 +268,18 @@ runs:
         echo "Running: orb automation exec $AUTOMATION --provider codex --session-id $SESSION_ID --gateway-url http://localhost:8787 ${PARAM_ARGS[*]:-}"
 
         set +e
+        # NOTE: deliberately omitting `--gateway-url` for codex.
+        # Setting it makes orb export OPENAI_BASE_URL=$gateway/v1, which
+        # routes ChatCompletions/Responses through the orb gateway. If
+        # the gateway's OpenAI proxy isn't fully wired (acts as a black
+        # hole), codex silently gets no tool-call replies and exits
+        # narration-only with all tasks pending. We let codex talk
+        # directly to api.openai.com using OPENAI_API_KEY; tasktracker /
+        # tracer MCPs are stdio (~/.codex/config.toml), not gateway.
         orb automation exec "$AUTOMATION" \
           --provider codex \
           --model "${{ inputs.model }}" \
           --session-id "$SESSION_ID" \
-          --gateway-url http://localhost:8787 \
           "${PARAM_ARGS[@]}"
         EXIT=$?
         set -e
