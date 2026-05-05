@@ -157,7 +157,14 @@ runs:
       run: |
         set -euo pipefail
         echo "Initializing orb..."
-        if orb init --skip-index --no-browser --no-report; then
+        # `--agents=codex` is REQUIRED — without it orb init does not
+        # write ~/.codex/config.toml with the orb MCP servers
+        # (tasktracker / procedure-tracer / memory / code / playwright).
+        # Codex CLI then runs with zero tools to call and the orchestrator
+        # turn is "narration-only": no tool_calls, all tasks left
+        # pending/in_progress, procedure exits with 0/N successful.
+        # Mirrors the gemini action's `--agents=gemini` pattern.
+        if orb init --skip-index --no-browser --no-report --agents=codex; then
           echo "orb init succeeded"
         else
           if [ "${ACT:-false}" = "true" ]; then
@@ -268,18 +275,11 @@ runs:
         echo "Running: orb automation exec $AUTOMATION --provider codex --session-id $SESSION_ID --gateway-url http://localhost:8787 ${PARAM_ARGS[*]:-}"
 
         set +e
-        # NOTE: deliberately omitting `--gateway-url` for codex.
-        # Setting it makes orb export OPENAI_BASE_URL=$gateway/v1, which
-        # routes ChatCompletions/Responses through the orb gateway. If
-        # the gateway's OpenAI proxy isn't fully wired (acts as a black
-        # hole), codex silently gets no tool-call replies and exits
-        # narration-only with all tasks pending. We let codex talk
-        # directly to api.openai.com using OPENAI_API_KEY; tasktracker /
-        # tracer MCPs are stdio (~/.codex/config.toml), not gateway.
         orb automation exec "$AUTOMATION" \
           --provider codex \
           --model "${{ inputs.model }}" \
           --session-id "$SESSION_ID" \
+          --gateway-url http://localhost:8787 \
           "${PARAM_ARGS[@]}"
         EXIT=$?
         set -e
