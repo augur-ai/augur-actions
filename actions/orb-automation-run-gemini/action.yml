@@ -64,6 +64,20 @@ inputs:
     required: false
     default: '1'
 
+  install_playwright:
+    description: |
+      Install and cache Playwright browsers before the agent runs. Set to
+      'true' when your automation drives Playwright. Skipped when 'false'
+      (default) so non-Playwright automations don't pay for it. Doing this
+      here keeps the install off the agent's 10-min subagent clock.
+    required: false
+    default: 'false'
+
+  playwright_browser:
+    description: "Playwright browser to install when install_playwright=true (chromium | firefox | webkit | all)."
+    required: false
+    default: 'chromium'
+
 outputs:
   session_id:
     description: 'orb session ID for this automation run'
@@ -315,6 +329,60 @@ runs:
           echo "gemini not found on PATH after install/cache restore"; exit 1
         fi
         echo "gemini: $(gemini --version 2>/dev/null || true)"
+
+    # ─────────────────────────────────────────────
+    # Step 5b: Setup Playwright (optional, opt-in via install_playwright)
+    #
+    # The Gemini agent has a hard 10-minute subagent deadline
+    # (google-gemini/gemini-cli#24412). Letting the agent run
+    # `npx playwright install --with-deps` itself on a cold runner reliably
+    # blows that budget, so we hoist it here when the caller opts in.
+    # `--with-deps` uses Playwright's own apt list, which tracks Ubuntu
+    # package renames (e.g. libasound2 → libasound2t64 on 24.04) — that's
+    # why we delegate to it instead of hand-rolling apt.
+    # ─────────────────────────────────────────────
+    - name: Cache Playwright browsers
+      if: inputs.install_playwright == 'true'
+      id: cache-playwright
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/ms-playwright
+        key: ms-playwright-${{ runner.os }}-${{ runner.arch }}-${{ inputs.playwright_browser }}-${{ hashFiles(format('{0}/{1}/package-lock.json', github.workspace, inputs.working_directory), format('{0}/{1}/package.json', github.workspace, inputs.working_directory)) }}
+        restore-keys: |
+          ms-playwright-${{ runner.os }}-${{ runner.arch }}-${{ inputs.playwright_browser }}-
+        # Save the cache even when downstream steps fail. Without this,
+        # a job that fails on (e.g.) artifact upload would skip the Post
+        # step and the chromium tarball gets re-downloaded next run.
+        save-always: true
+
+    - name: Install Playwright + npm deps (optional)
+      if: inputs.install_playwright == 'true'
+      shell: bash
+      working-directory: ${{ github.workspace }}/${{ inputs.working_directory }}
+      env:
+        PLAYWRIGHT_BROWSER: ${{ inputs.playwright_browser }}
+      run: |
+        set -euo pipefail
+        if [ ! -f package.json ]; then
+          echo "install_playwright=true but no package.json in working directory — skipping"
+          exit 0
+        fi
+        if [ ! -d node_modules ]; then
+          echo "Installing npm deps..."
+          npm install --no-audit --no-fund
+        else
+          echo "node_modules already present — skipping npm install"
+        fi
+        # Under act on rosetta-emulated linux/amd64, the apt step inside
+        # `--with-deps` frequently hangs (PPA reachability) — fall back to
+        # browser-only. On real GHA runners --with-deps is the right call.
+        if [ "${ACT:-false}" = "true" ]; then
+          echo "act detected — running 'npx playwright install $PLAYWRIGHT_BROWSER' (no --with-deps)"
+          npx playwright install "$PLAYWRIGHT_BROWSER"
+        else
+          echo "Running 'npx playwright install --with-deps $PLAYWRIGHT_BROWSER'"
+          npx playwright install --with-deps "$PLAYWRIGHT_BROWSER"
+        fi
 
     # ─────────────────────────────────────────────
     # Step 6: Run automation with Gemini
