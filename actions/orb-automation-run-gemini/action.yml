@@ -376,16 +376,16 @@ runs:
         else
           echo "node_modules already present — skipping npm install"
         fi
-        # Under act on rosetta-emulated linux/amd64, the apt step inside
-        # `--with-deps` frequently hangs (PPA reachability) — fall back to
-        # browser-only. On real GHA runners --with-deps is the right call.
-        if [ "${ACT:-false}" = "true" ]; then
-          echo "act detected — running 'npx playwright install $PLAYWRIGHT_BROWSER' (no --with-deps)"
-          npx playwright install "$PLAYWRIGHT_BROWSER"
-        else
-          echo "Running 'npx playwright install --with-deps $PLAYWRIGHT_BROWSER'"
-          npx playwright install --with-deps "$PLAYWRIGHT_BROWSER"
-        fi
+        # `--with-deps` always — Playwright's own apt list is the only
+        # thing that tracks Ubuntu package renames (e.g. libasound2 →
+        # libasound2t64 on 24.04). Skipping it leaves chromium installed
+        # but unable to launch (`libnspr4.so: cannot open shared object
+        # file`). Earlier we conditionally skipped it under act fearing
+        # apt hangs on rosetta-emulated linux/amd64, but
+        # catthehacker/ubuntu:act-latest's apt works fine; the skip cost
+        # us local-act parity for nothing.
+        echo "Running 'npx playwright install --with-deps $PLAYWRIGHT_BROWSER'"
+        npx playwright install --with-deps "$PLAYWRIGHT_BROWSER"
 
     # ─────────────────────────────────────────────
     # Step 6: Run automation with Gemini
