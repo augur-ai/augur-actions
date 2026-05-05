@@ -46,6 +46,20 @@ inputs:
     required: false
     default: '.'
 
+  install_playwright:
+    description: |
+      Install and cache Playwright browsers before the agent runs. Set to
+      'true' when your automation drives Playwright. Skipped when 'false'
+      (default) so non-Playwright automations don't pay for it. Doing this
+      here keeps the install off the agent's subagent clock.
+    required: false
+    default: 'false'
+
+  playwright_browser:
+    description: "Playwright browser to install when install_playwright=true (chromium | firefox | webkit | all)."
+    required: false
+    default: 'chromium'
+
 outputs:
   session_id:
     description: 'orb session ID for this automation run'
@@ -100,8 +114,12 @@ runs:
           echo "$BREW_PREFIX/bin" >> "$GITHUB_PATH"
         fi
 
-        orb --version
-        echo "orb installed: $(orb --version)"
+        # `$GITHUB_PATH` only applies to subsequent steps; within this
+        # step we still need an absolute path. Resolve it from whichever
+        # branch above ran (pre-built bin → INSTALL_DIR; brew → BREW_PREFIX).
+        ORB_CMD="$([ -n "${ORB_BIN:-}" ] && echo "$INSTALL_DIR/orb" || echo "${BREW_PREFIX}/bin/orb")"
+        "$ORB_CMD" --version
+        echo "orb installed: $($ORB_CMD --version)"
 
     # ─────────────────────────────────────────────
     # Step 2: Authenticate orb
@@ -170,6 +188,48 @@ runs:
           fi
           echo "Gateway failed to start"; exit 1
         fi
+
+    # ─────────────────────────────────────────────
+    # Step 4b: Setup Playwright (optional, opt-in via install_playwright)
+    #
+    # The procedure scaffold has no install_deps task; the agent expects
+    # Playwright + chromium to be on disk before run_test. Hoist the
+    # install here when the caller opts in. `--with-deps` always — it
+    # uses Playwright's apt list which tracks Ubuntu package renames
+    # (e.g. libasound2 → libasound2t64 on 24.04). Skipping it leaves
+    # chromium installed but unable to launch.
+    # ─────────────────────────────────────────────
+    - name: Cache Playwright browsers
+      if: inputs.install_playwright == 'true'
+      id: cache-playwright
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/ms-playwright
+        key: ms-playwright-${{ runner.os }}-${{ runner.arch }}-${{ inputs.playwright_browser }}-${{ hashFiles('**/package-lock.json', '**/package.json') }}
+        restore-keys: |
+          ms-playwright-${{ runner.os }}-${{ runner.arch }}-${{ inputs.playwright_browser }}-
+        save-always: true
+
+    - name: Install Playwright + npm deps (optional)
+      if: inputs.install_playwright == 'true'
+      shell: bash
+      working-directory: ${{ github.workspace }}/${{ inputs.working_directory }}
+      env:
+        PLAYWRIGHT_BROWSER: ${{ inputs.playwright_browser }}
+      run: |
+        set -euo pipefail
+        if [ ! -f package.json ]; then
+          echo "install_playwright=true but no package.json in working directory — skipping"
+          exit 0
+        fi
+        if [ ! -d node_modules ]; then
+          echo "Installing npm deps..."
+          npm install --no-audit --no-fund
+        else
+          echo "node_modules already present — skipping npm install"
+        fi
+        echo "Running 'npx playwright install --with-deps $PLAYWRIGHT_BROWSER'"
+        npx playwright install --with-deps "$PLAYWRIGHT_BROWSER"
 
     # ─────────────────────────────────────────────
     # Step 5: Run automation with Codex
