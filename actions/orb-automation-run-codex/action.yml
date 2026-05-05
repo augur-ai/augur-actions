@@ -186,22 +186,11 @@ runs:
           echo "── codex config (orb init output) ──"
           cat "$CODEX_CFG"
           echo "── injecting startup_timeout_sec=60 ──"
-          python3 - <<PY
-import re, pathlib
-p = pathlib.Path("$CODEX_CFG")
-text = p.read_text()
-# Insert `startup_timeout_sec = 60` directly under each [mcp_servers.<name>] header
-# unless it (or another startup_timeout_sec line) is already present in that section.
-pattern = re.compile(r"(\[mcp_servers\.[^\]]+\]\n)((?:[^\[]*?))(?=\n\[|\Z)", re.DOTALL)
-def inject(m):
-    header, body = m.group(1), m.group(2)
-    if "startup_timeout_sec" in body:
-        return m.group(0)
-    return header + "startup_timeout_sec = 60\n" + body
-new = pattern.sub(inject, text)
-p.write_text(new)
-print(new)
-PY
+          if ! grep -q "startup_timeout_sec" "$CODEX_CFG"; then
+            awk '/^\[mcp_servers\./{print; print "startup_timeout_sec = 60"; next}{print}' "$CODEX_CFG" > "$CODEX_CFG.new" && mv "$CODEX_CFG.new" "$CODEX_CFG"
+          fi
+          echo "── codex config (post-injection) ──"
+          cat "$CODEX_CFG"
         else
           echo "::warning::$CODEX_CFG not present — orb init may have skipped codex agents wiring"
         fi
