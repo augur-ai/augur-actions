@@ -335,6 +335,7 @@ runs:
       working-directory: ${{ github.workspace }}/${{ inputs.working_directory }}
       env:
         PLAYWRIGHT_BROWSER: ${{ inputs.playwright_browser }}
+        PLAYWRIGHT_CACHE_HIT: ${{ steps.cache-playwright.outputs.cache-hit }}
       run: |
         set -euo pipefail
         if [ ! -f package.json ]; then
@@ -347,8 +348,20 @@ runs:
         else
           echo "node_modules already present — skipping npm install"
         fi
-        echo "Running 'npx playwright install --with-deps $PLAYWRIGHT_BROWSER'"
-        npx playwright install --with-deps "$PLAYWRIGHT_BROWSER"
+        # `--with-deps` runs apt-get for ~50 system libs every time
+        # (libnss3, libgtk-3, ffmpeg, …) — that's the slow
+        # "Switching to root user to install dependencies..." step.
+        # On cache hit the browser binaries are already in
+        # ~/.cache/ms-playwright AND ubuntu-latest images keep system
+        # libs across runs, so we skip --with-deps. On miss we still
+        # install with deps so a fresh runner can run Chromium.
+        if [ "${PLAYWRIGHT_CACHE_HIT:-}" = "true" ]; then
+          echo "Cache hit — running 'npx playwright install $PLAYWRIGHT_BROWSER' (no --with-deps)"
+          npx playwright install "$PLAYWRIGHT_BROWSER"
+        else
+          echo "Cache miss — running 'npx playwright install --with-deps $PLAYWRIGHT_BROWSER'"
+          npx playwright install --with-deps "$PLAYWRIGHT_BROWSER"
+        fi
 
     # ─────────────────────────────────────────────
     # Step 5: Run automation with Codex
