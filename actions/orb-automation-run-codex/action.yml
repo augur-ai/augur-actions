@@ -32,13 +32,14 @@ inputs:
 
   model:
     description: |
-      Codex model to use. Default is gpt-5.1-codex-mini (cheapest GPT-5
-      that reliably makes tool calls). The legacy default 'o3-mini'
-      drops into "narration-only" turns on procedure prompts (no tool
-      calls → orchestrator exits with all tasks pending). Override via
-      this input — e.g. gpt-5.3-codex for the higher-quality model.
+      Codex model to use. Default is gpt-5.3-codex (matches the model
+      orb's codex subagents use internally; reliable tool-calling on
+      procedure prompts). The legacy default 'o3-mini' dropped into
+      "narration-only" turns (no tool calls → orchestrator exits with
+      all tasks pending). Override for cheaper runs e.g. gpt-5.1-codex-
+      mini.
     required: false
-    default: 'gpt-5.1-codex-mini'
+    default: 'gpt-5.3-codex'
 
   max_turns:
     description: 'Maximum number of agentic turns. Leave empty if no limit.'
