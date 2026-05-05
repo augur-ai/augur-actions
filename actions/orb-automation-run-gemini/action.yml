@@ -350,6 +350,10 @@ runs:
         key: ms-playwright-${{ runner.os }}-${{ runner.arch }}-${{ inputs.playwright_browser }}-${{ hashFiles(format('{0}/{1}/package-lock.json', github.workspace, inputs.working_directory), format('{0}/{1}/package.json', github.workspace, inputs.working_directory)) }}
         restore-keys: |
           ms-playwright-${{ runner.os }}-${{ runner.arch }}-${{ inputs.playwright_browser }}-
+        # Save the cache even when downstream steps fail. Without this,
+        # a job that fails on (e.g.) artifact upload would skip the Post
+        # step and the chromium tarball gets re-downloaded next run.
+        save-always: true
 
     - name: Install Playwright + npm deps (optional)
       if: inputs.install_playwright == 'true'
