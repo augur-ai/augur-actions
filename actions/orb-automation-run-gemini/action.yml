@@ -347,7 +347,10 @@ runs:
       uses: actions/cache@v4
       with:
         path: ~/.cache/ms-playwright
-        key: ms-playwright-${{ runner.os }}-${{ runner.arch }}-${{ inputs.playwright_browser }}-${{ hashFiles(format('{0}/{1}/package-lock.json', github.workspace, inputs.working_directory), format('{0}/{1}/package.json', github.workspace, inputs.working_directory)) }}
+        # hashFiles() takes glob patterns (not formatted absolute paths) —
+        # using **/ scopes correctly to anywhere in the repo. Matches the
+        # canonical Playwright CI snippet.
+        key: ms-playwright-${{ runner.os }}-${{ runner.arch }}-${{ inputs.playwright_browser }}-${{ hashFiles('**/package-lock.json', '**/package.json') }}
         restore-keys: |
           ms-playwright-${{ runner.os }}-${{ runner.arch }}-${{ inputs.playwright_browser }}-
         # Save the cache even when downstream steps fail. Without this,
