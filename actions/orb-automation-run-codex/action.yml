@@ -20,6 +20,16 @@ inputs:
     required: false
     default: ''
 
+  env:
+    description: |
+      Newline-separated KEY=VALUE pairs exported to the runner env BEFORE
+      `orb automation exec` runs. Lets shell tasks inside the automation
+      see automation-specific values (e.g. WATCH_ID, PROJECT_SLUG, AUGUR_RUN_ID
+      for repo-scan-inventory) without baking them into the composite.
+      Customer workflows pass exactly the env their automation needs.
+    required: false
+    default: ''
+
   orb_version:
     description: 'orb version to install. Defaults to latest.'
     required: false
@@ -223,6 +233,44 @@ runs:
           fi
           echo "orb auth login failed"; exit 1
         fi
+        # Resolve ORG_ID from ~/.orb/auth.json (orb auth login wrote it
+        # there) and export to GITHUB_ENV so subsequent steps (incl. orb
+        # gateway's session-bind path) see ORB_ORG_ID without the customer
+        # having to set it themselves. Customer workflows only carry
+        # ORB_API_TOKEN; identity flows from the token, not env vars.
+        if [ -f "$HOME/.orb/auth.json" ]; then
+          ORG_ID=$(python3 -c "import json,sys; d=json.load(open('$HOME/.orb/auth.json')); print(d.get('org_id',''))" 2>/dev/null || true)
+          if [ -n "$ORG_ID" ]; then
+            echo "ORB_ORG_ID=$ORG_ID" >> "$GITHUB_ENV"
+            echo "Exported ORB_ORG_ID from auth.json"
+          else
+            echo "::warning::~/.orb/auth.json present but org_id missing — gateway session bind may fail"
+          fi
+        fi
+
+    # ─────────────────────────────────────────────
+    # Step 2a: Export per-automation env (input `env`)
+    #
+    # Customer workflows pass automation-specific env via the `env` input
+    # (multiline KEY=VALUE). Examples: WATCH_ID, PROJECT_SLUG, AUGUR_RUN_ID
+    # for repo-scan-inventory; whatever each automation needs.
+    # The composite stays automation-agnostic.
+    # ─────────────────────────────────────────────
+    - name: Export automation env
+      if: ${{ inputs.env != '' }}
+      shell: bash
+      env:
+        EXTRA_ENV: ${{ inputs.env }}
+      run: |
+        set -euo pipefail
+        while IFS= read -r line; do
+          line="${line%$'\r'}"
+          [ -z "$line" ] && continue
+          case "$line" in \#*) continue ;; esac
+          [[ "$line" != *"="* ]] && continue
+          echo "$line" >> "$GITHUB_ENV"
+          echo "exported: ${line%%=*}=***"
+        done <<< "$EXTRA_ENV"
 
     # ─────────────────────────────────────────────
     # Step 2b: Refresh skills from Augur registry
