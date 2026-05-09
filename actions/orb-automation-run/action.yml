@@ -150,6 +150,21 @@ runs:
         fi
 
     # ─────────────────────────────────────────────
+    # Step 1b2: Refresh skills from Augur registry (see codex action for full rationale)
+    # ─────────────────────────────────────────────
+    - name: Refresh skills from registry
+      shell: bash
+      run: |
+        set -uo pipefail
+        BACKEND_URL="${ORB_BACKEND_URL:-https://app.getaugur.ai}"
+        echo "Refreshing skills from $BACKEND_URL..."
+        if orb skills refresh --backend-url "$BACKEND_URL"; then
+          echo "orb skills refresh succeeded"
+        else
+          echo "::warning::orb skills refresh failed — automation will use embedded SKILL.md only"
+        fi
+
+    # ─────────────────────────────────────────────
     # Step 1c: Initialize orb (extracts MCPs, writes Claude hooks)
     # ─────────────────────────────────────────────
     - name: Initialize orb

@@ -225,6 +225,31 @@ runs:
         fi
 
     # ─────────────────────────────────────────────
+    # Step 2b: Refresh skills from Augur registry
+    #
+    # `orb init` (Step 3) writes embedded SKILL.md files but doesn't ship
+    # the per-skill scripts/, references/, ast-grep-rules/ subtrees that
+    # automations depend on. `orb skills refresh` pulls the full bundle
+    # tarballs from /api/v1/skills/<name>@<ver>/bundle and extracts them
+    # to ~/.codex/skills/, ~/.claude/skills/, etc. Runs AFTER auth login
+    # because the registry endpoint requires a valid token.
+    # Non-fatal — if the registry is unreachable, init's embedded
+    # SKILL.md still ships and the automation can fall back to the
+    # bundled-narration shape.
+    # ─────────────────────────────────────────────
+    - name: Refresh skills from registry
+      shell: bash
+      run: |
+        set -uo pipefail
+        BACKEND_URL="${ORB_BACKEND_URL:-https://app.getaugur.ai}"
+        echo "Refreshing skills from $BACKEND_URL..."
+        if orb skills refresh --backend-url "$BACKEND_URL"; then
+          echo "orb skills refresh succeeded"
+        else
+          echo "::warning::orb skills refresh failed — automation will use embedded SKILL.md only"
+        fi
+
+    # ─────────────────────────────────────────────
     # Step 3: Initialize orb
     # ─────────────────────────────────────────────
     - name: Initialize orb
