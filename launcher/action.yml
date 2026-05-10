@@ -1,0 +1,163 @@
+name: 'Augur Launcher'
+description: |
+  Single composite that customers consume for ALL Augur automations.
+  Resolves `automation_id` against the catalog, validates the chosen
+  agent + secret, then routes to the matching agent composite
+  (orb-automation-run / -codex / -gemini).
+author: 'augur-ai'
+
+branding:
+  icon: 'play'
+  color: 'green'
+
+# Reads at runtime:
+#   env.ORB_BACKEND_URL  — catalog endpoint host
+#   env.ORB_ORG_ID       — for catalog audience filter
+#   env.ORB_API_TOKEN    — augur API token
+#   env.ANTHROPIC_API_KEY / OPENAI_API_KEY / GOOGLE_API_KEY  — agent keys
+#   env.GH_TOKEN         — for `gh pr create` inside the automation
+
+inputs:
+  automation_id:
+    description: 'Automation id from the augur catalog (e.g. orb-test-generate-from-plan)'
+    required: true
+  agent:
+    description: 'Agent to run with: claude | codex | gemini. NO default — customer or platform must pick.'
+    required: true
+  payload:
+    description: |
+      JSON object whose keys become individual `KEY=value` env exports
+      passed to the agent composite as `extra_env`. The automation reads
+      these as $PLAN_ID, $WATCH_ID, $TARGET_BRANCH, $QUERY, etc.
+    required: true
+  augur_run_id:
+    description: 'Augur run correlation id — propagated to publish-results so backend can update pm_plan_runs'
+    required: true
+
+outputs:
+  status:
+    description: 'PASS or FAIL — bubbles up from the agent composite'
+    value: ${{ steps.run-claude.outputs.run_status || steps.run-codex.outputs.run_status || steps.run-gemini.outputs.run_status }}
+  session_id:
+    description: 'orb session id from whichever agent ran'
+    value: ${{ steps.run-claude.outputs.session_id || steps.run-codex.outputs.session_id || steps.run-gemini.outputs.session_id }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Validate inputs
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [ -z "${{ inputs.agent }}" ]; then
+          echo "::error::agent input is required (no default). Pass one of: claude | codex | gemini"
+          exit 1
+        fi
+        case "${{ inputs.agent }}" in
+          claude|codex|gemini) ;;
+          *) echo "::error::Unknown agent '${{ inputs.agent }}'. Supported: claude | codex | gemini"; exit 1 ;;
+        esac
+
+    - name: Validate agent secret is set
+      shell: bash
+      run: |
+        set -euo pipefail
+        case "${{ inputs.agent }}" in
+          claude)
+            [ -n "${ANTHROPIC_API_KEY:-}" ] || {
+              echo "::error::Agent 'claude' requires ANTHROPIC_API_KEY secret on this repo."; exit 1; }
+            ;;
+          codex)
+            [ -n "${OPENAI_API_KEY:-}" ] || {
+              echo "::error::Agent 'codex' requires OPENAI_API_KEY secret on this repo."; exit 1; }
+            ;;
+          gemini)
+            [ -n "${GOOGLE_API_KEY:-}" ] || {
+              echo "::error::Agent 'gemini' requires GOOGLE_API_KEY secret on this repo."; exit 1; }
+            ;;
+        esac
+
+    - name: Fetch automation from catalog
+      id: fetch
+      shell: bash
+      run: |
+        set -euo pipefail
+        BACKEND="${ORB_BACKEND_URL:-https://api.getaugur.ai}"
+        AUTOMATION_ID="${{ inputs.automation_id }}"
+        URL="${BACKEND%/}/api/v1/automations/library/templates/${AUTOMATION_ID}"
+
+        AUTH_HEADER=()
+        if [ -n "${ORB_API_TOKEN:-}" ]; then
+          AUTH_HEADER=(-H "Authorization: Bearer ${ORB_API_TOKEN}")
+        fi
+
+        mkdir -p /tmp/orb-tg
+        BODY_FILE=/tmp/orb-tg/automation.json
+
+        HTTP_CODE=$(curl -sS -o "$BODY_FILE" -w "%{http_code}" "${AUTH_HEADER[@]}" "$URL" || echo "000")
+        if [ "$HTTP_CODE" != "200" ]; then
+          echo "::error::Could not fetch automation '$AUTOMATION_ID' from $URL (HTTP $HTTP_CODE)"
+          [ -s "$BODY_FILE" ] && head -c 500 "$BODY_FILE"
+          exit 1
+        fi
+
+        # Validate the automation declares supported_agents and the
+        # chosen agent is in it. Catalog drives the contract; if the
+        # entry omits this field we fall open (legacy entries).
+        SUPPORTED=$(jq -r '.supported_agents // empty | join(",")' "$BODY_FILE" || echo "")
+        if [ -n "$SUPPORTED" ]; then
+          case ",$SUPPORTED," in
+            *,${{ inputs.agent }},*) ;;
+            *)
+              echo "::error::Automation '$AUTOMATION_ID' does not support agent '${{ inputs.agent }}' (supported: $SUPPORTED)"
+              exit 1 ;;
+          esac
+        fi
+
+        # Make the body available to the agent composite via
+        # ORB_AUTOMATION_PATH. The agent composites already accept a
+        # local file path via this env var (added in the same change).
+        echo "ORB_AUTOMATION_PATH=$BODY_FILE" >> "$GITHUB_ENV"
+
+    - name: Build extra_env from payload
+      id: payload
+      shell: bash
+      run: |
+        set -euo pipefail
+        PAYLOAD='${{ inputs.payload }}'
+        # Convert JSON object → newline-separated KEY=value lines for
+        # the agent composite's `env:` input. jq handles escaping.
+        EXTRA_ENV=$(printf '%s' "$PAYLOAD" | jq -r 'to_entries[] | "\(.key)=\(.value)"' || echo "")
+        # Append AUGUR_RUN_ID so publish-results can correlate.
+        EXTRA_ENV="${EXTRA_ENV}
+AUGUR_RUN_ID=${{ inputs.augur_run_id }}"
+        # Multi-line GHA output via heredoc.
+        {
+          echo "extra_env<<__EOF__"
+          echo "$EXTRA_ENV"
+          echo "__EOF__"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Run with claude
+      id: run-claude
+      if: ${{ inputs.agent == 'claude' }}
+      uses: augur-ai/augur-actions/actions/orb-automation-run@main
+      with:
+        automation: ${{ inputs.automation_id }}
+        env: ${{ steps.payload.outputs.extra_env }}
+
+    - name: Run with codex
+      id: run-codex
+      if: ${{ inputs.agent == 'codex' }}
+      uses: augur-ai/augur-actions/actions/orb-automation-run-codex@main
+      with:
+        automation: ${{ inputs.automation_id }}
+        env: ${{ steps.payload.outputs.extra_env }}
+
+    - name: Run with gemini
+      id: run-gemini
+      if: ${{ inputs.agent == 'gemini' }}
+      uses: augur-ai/augur-actions/actions/orb-automation-run-gemini@main
+      with:
+        automation: ${{ inputs.automation_id }}
+        env: ${{ steps.payload.outputs.extra_env }}
