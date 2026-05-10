@@ -58,24 +58,12 @@ runs:
           *) echo "::error::Unknown agent '${{ inputs.agent }}'. Supported: claude | codex | gemini"; exit 1 ;;
         esac
 
-    - name: Validate agent secret is set
-      shell: bash
-      run: |
-        set -euo pipefail
-        case "${{ inputs.agent }}" in
-          claude)
-            [ -n "${ANTHROPIC_API_KEY:-}" ] || {
-              echo "::error::Agent 'claude' requires ANTHROPIC_API_KEY secret on this repo."; exit 1; }
-            ;;
-          codex)
-            [ -n "${OPENAI_API_KEY:-}" ] || {
-              echo "::error::Agent 'codex' requires OPENAI_API_KEY secret on this repo."; exit 1; }
-            ;;
-          gemini)
-            [ -n "${GOOGLE_API_KEY:-}" ] || {
-              echo "::error::Agent 'gemini' requires GOOGLE_API_KEY secret on this repo."; exit 1; }
-            ;;
-        esac
+    # Per-agent secret validation deliberately removed: act's composite
+    # scoping doesn't always export the workflow-level `env:` block to
+    # composite step processes, leading to false negatives. The agent
+    # composite that runs next (orb-automation-run / -codex / -gemini)
+    # has its own auth setup that surfaces a clear error if the secret
+    # is missing — so the early-validation here was redundant.
 
     - name: Fetch automation from catalog
       id: fetch
