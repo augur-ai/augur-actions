@@ -125,12 +125,10 @@ runs:
       run: |
         set -euo pipefail
         PAYLOAD='${{ inputs.payload }}'
-        # Convert JSON object → newline-separated KEY=value lines for
-        # the agent composite's `env:` input. jq handles escaping.
+        # JSON object → KEY=value lines; jq handles escaping.
         EXTRA_ENV=$(printf '%s' "$PAYLOAD" | jq -r 'to_entries[] | "\(.key)=\(.value)"' || echo "")
         # Append AUGUR_RUN_ID so publish-results can correlate.
-        EXTRA_ENV="${EXTRA_ENV}
-AUGUR_RUN_ID=${{ inputs.augur_run_id }}"
+        EXTRA_ENV=$(printf '%s\nAUGUR_RUN_ID=%s\n' "$EXTRA_ENV" "${{ inputs.augur_run_id }}")
         # Multi-line GHA output via heredoc.
         {
           echo "extra_env<<__EOF__"
