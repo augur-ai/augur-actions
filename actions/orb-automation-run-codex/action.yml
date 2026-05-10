@@ -154,6 +154,12 @@ runs:
         set -euo pipefail
         PREFIX="$(npm config get prefix)"
         echo "prefix=$PREFIX" >> "$GITHUB_OUTPUT"
+        # Add the npm prefix bin to PATH for ALL subsequent steps —
+        # both cache-hit (codex restored to $PREFIX/bin) and cache-miss
+        # (codex installed there by `npm install -g`). Without this,
+        # Verify Codex CLI's `command -v codex` fails on cache-hit
+        # because nothing in the cache step extends GITHUB_PATH.
+        echo "$PREFIX/bin" >> "$GITHUB_PATH"
 
     - name: Cache Codex CLI
       id: cache-codex
