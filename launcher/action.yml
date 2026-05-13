@@ -26,12 +26,19 @@ inputs:
     required: true
   payload:
     description: |
-      JSON object whose keys become individual `KEY=value` env exports
-      passed to the agent composite as `extra_env`. The automation reads
-      these as $PLAN_ID, $WATCH_ID, $TARGET_BRANCH, $QUERY, etc.
+      JSON object — automation-SPECIFIC data only (mode, target_branch,
+      plan_id, query, etc). Cross-cutting fields (watch_id, project_slug,
+      augur_run_id) are first-class inputs below. Keys become individual
+      `KEY=value` env exports to the agent composite as `extra_env`.
     required: true
   augur_run_id:
     description: 'Augur run correlation id — propagated to publish-results so backend can update pm_plan_runs'
+    required: true
+  watch_id:
+    description: 'Augur release_watches.id — exported to the agent runner as WATCH_ID env (canonical, used by post_inventory.sh and other publish scripts).'
+    required: true
+  project_slug:
+    description: 'Augur project slug — exported to the agent runner as PROJECT_SLUG env. Defaults to "default" for orgs with a single project.'
     required: true
 
 outputs:
@@ -107,16 +114,25 @@ runs:
         # local file path via this env var (added in the same change).
         echo "ORB_AUTOMATION_PATH=$BODY_FILE" >> "$GITHUB_ENV"
 
-    - name: Build extra_env from payload
+    - name: Build extra_env from payload + first-class inputs
       id: payload
       shell: bash
       run: |
         set -euo pipefail
         PAYLOAD='${{ inputs.payload }}'
         # JSON object → KEY=value lines; jq handles escaping.
+        # Payload carries automation-SPECIFIC data only (mode, target_branch, etc).
         EXTRA_ENV=$(printf '%s' "$PAYLOAD" | jq -r 'to_entries[] | "\(.key)=\(.value)"' || echo "")
-        # Append AUGUR_RUN_ID so publish-results can correlate.
-        EXTRA_ENV=$(printf '%s\nAUGUR_RUN_ID=%s\n' "$EXTRA_ENV" "${{ inputs.augur_run_id }}")
+        # First-class inputs are exported under their canonical UPPER_CASE
+        # names that the publish/runtime scripts read directly. This
+        # decouples the customer-side workflow contract from per-script
+        # env-var name choices and avoids per-key alias translation
+        # in this composite.
+        EXTRA_ENV=$(printf '%s\nAUGUR_RUN_ID=%s\nWATCH_ID=%s\nPROJECT_SLUG=%s\n' \
+          "$EXTRA_ENV" \
+          "${{ inputs.augur_run_id }}" \
+          "${{ inputs.watch_id }}" \
+          "${{ inputs.project_slug }}")
         # Multi-line GHA output via heredoc.
         {
           echo "extra_env<<__EOF__"
