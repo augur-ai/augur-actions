@@ -451,6 +451,15 @@ runs:
       env:
         OPENAI_API_KEY: ${{ env.OPENAI_API_KEY }}
         ORB_API_TOKEN: ${{ env.ORB_API_TOKEN }}
+        # ORB_BACKEND_URL is what the orb relay sink uses to stream
+        # per-task stdout/stderr to the platform. Without it the relay
+        # is disabled, the GHA log shows only the task-status table
+        # (no task output), and any failure inside a shell task is
+        # impossible to diagnose without re-running locally. Defaulted
+        # here so the orb-automation-run-codex consumer doesn't have to
+        # set ORB_BACKEND_URL itself — matches the orb-automation-run
+        # (Claude) composite which has always had this default.
+        ORB_BACKEND_URL: ${{ env.ORB_BACKEND_URL || 'https://app.getaugur.ai' }}
         ORB_PROJECT_ROOT: ${{ github.workspace }}/${{ inputs.working_directory }}
         ORB_PROJECT_ID: ${{ env.ORB_PROJECT_ID }}
       run: |
