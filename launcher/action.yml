@@ -117,12 +117,22 @@ runs:
     - name: Build extra_env from payload + first-class inputs
       id: payload
       shell: bash
+      env:
+        # Pass the payload through the environment, NOT a ${{ }} splice
+        # into the script body. The payload carries free-form fields
+        # (pr_title, pr_body) that routinely contain apostrophes, parens
+        # and quotes — splicing those into `PAYLOAD='...'` breaks the
+        # shell parse ("syntax error near unexpected token").
+        PAYLOAD: ${{ inputs.payload }}
       run: |
         set -euo pipefail
-        PAYLOAD='${{ inputs.payload }}'
-        # JSON object → KEY=value lines; jq handles escaping.
-        # Payload carries automation-SPECIFIC data only (mode, target_branch, etc).
-        EXTRA_ENV=$(printf '%s' "$PAYLOAD" | jq -r 'to_entries[] | "\(.key)=\(.value)"' || echo "")
+        # JSON object → KEY=value lines; jq handles escaping. Newlines in
+        # a value (e.g. a multi-line pr_body) are flattened to spaces so
+        # each entry stays a single, well-formed KEY=value line — the
+        # consumer exports these one-per-line into $GITHUB_ENV.
+        EXTRA_ENV=$(printf '%s' "${PAYLOAD:-}" \
+          | jq -r 'to_entries[] | "\(.key)=\((.value | tostring) | gsub("\r";" ") | gsub("\n";" "))"' \
+          || echo "")
         # First-class inputs are exported under their canonical UPPER_CASE
         # names that the publish/runtime scripts read directly. This
         # decouples the customer-side workflow contract from per-script
