@@ -9,7 +9,7 @@ branding:
 # Secrets are read from environment variables set at the workflow/repo level:
 #   ANTHROPIC_API_KEY  — Anthropic API key
 #   ORB_API_TOKEN      — orb registry API token
-#   ORB_BACKEND_URL    — orb backend URL (defaults to https://app.getaugur.ai)
+#   ORB_BACKEND_URL    — orb backend URL (defaults to https://beta.testfold.ai)
 
 inputs:
   automation:
@@ -142,7 +142,7 @@ runs:
       run: |
         set -euo pipefail
 
-        BACKEND_URL="${ORB_BACKEND_URL:-https://app.getaugur.ai}"
+        BACKEND_URL="${ORB_BACKEND_URL:-https://beta.testfold.ai}"
 
         echo "🔐 Resolving identity from ORB_API_TOKEN against $BACKEND_URL..."
         if orb auth login --backend "$BACKEND_URL"; then
@@ -191,7 +191,7 @@ runs:
       shell: bash
       run: |
         set -uo pipefail
-        BACKEND_URL="${ORB_BACKEND_URL:-https://app.getaugur.ai}"
+        BACKEND_URL="${ORB_BACKEND_URL:-https://beta.testfold.ai}"
         echo "Refreshing skills from $BACKEND_URL..."
         if orb skills refresh --backend-url "$BACKEND_URL"; then
           echo "orb skills refresh succeeded"
@@ -233,7 +233,7 @@ runs:
       run: |
         set -euo pipefail
 
-        BACKEND_URL="${ORB_BACKEND_URL:-https://app.getaugur.ai}"
+        BACKEND_URL="${ORB_BACKEND_URL:-https://beta.testfold.ai}"
 
         echo "🌐 Starting orb gateway against $BACKEND_URL..."
         if orb gateway start --background --backend-url "$BACKEND_URL"; then
@@ -296,7 +296,7 @@ runs:
         echo "Prompt length: $(wc -c < "$PROMPT_FILE") bytes"
 
         # Print live run URL after session bind (--print-prompt registers session with gateway)
-        BACKEND_URL="${ORB_BACKEND_URL:-https://app.getaugur.ai}"
+        BACKEND_URL="${ORB_BACKEND_URL:-https://beta.testfold.ai}"
         LIVE_URL="${BACKEND_URL}/workflow-run?session_id=${SESSION_ID}"
         echo ""
         echo "::notice title=Live Run::${LIVE_URL}"
@@ -401,7 +401,7 @@ runs:
         ORB_SESSION_ID: ${{ steps.run-automation.outputs.session_id }}
         ORB_PROJECT_ROOT: ${{ github.workspace }}/${{ inputs.working_directory }}
         ORB_API_TOKEN: ${{ env.ORB_API_TOKEN }}
-        ORB_BACKEND_URL: ${{ env.ORB_BACKEND_URL || 'https://app.getaugur.ai' }}
+        ORB_BACKEND_URL: ${{ env.ORB_BACKEND_URL || 'https://beta.testfold.ai' }}
         ORB_PROJECT_ID: ${{ env.ORB_PROJECT_ID }}
       run: |
         set -euo pipefail

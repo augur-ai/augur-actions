@@ -10,7 +10,7 @@ Add these to your repository (`Settings` → `Secrets and variables` → `Action
 |--------|----------|-------------|
 | `ANTHROPIC_API_KEY` | Yes | Anthropic API key for Claude |
 | `ORB_API_TOKEN` | Yes | orb registry API token |
-| `ORB_BACKEND_URL` | No | orb backend URL — defaults to `https://app.getaugur.ai` |
+| `ORB_BACKEND_URL` | No | orb backend URL — defaults to `https://beta.testfold.ai` |
 
 ### 2. Add a workflow
 
@@ -30,7 +30,7 @@ jobs:
     env:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       ORB_API_TOKEN: ${{ secrets.ORB_API_TOKEN }}
-      # ORB_BACKEND_URL: ${{ secrets.ORB_BACKEND_URL }}  # optional, defaults to https://app.getaugur.ai
+      # ORB_BACKEND_URL: ${{ secrets.ORB_BACKEND_URL }}  # optional, defaults to https://beta.testfold.ai
     steps:
       - uses: actions/checkout@v4
 
@@ -98,7 +98,7 @@ Open the link to follow task progress and logs in real time.
 # .act.env
 ANTHROPIC_API_KEY=sk-...
 ORB_API_TOKEN=...
-# ORB_BACKEND_URL=https://app.getaugur.ai  # optional override
+# ORB_BACKEND_URL=https://beta.testfold.ai  # optional override
 
 act workflow_dispatch \
   --env-file .act.env \

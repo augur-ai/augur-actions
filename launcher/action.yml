@@ -77,7 +77,7 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        BACKEND="${ORB_BACKEND_URL:-https://app.getaugur.ai}"
+        BACKEND="${ORB_BACKEND_URL:-https://beta.testfold.ai}"
         AUTOMATION_ID="${{ inputs.automation_id }}"
         URL="${BACKEND%/}/api/v1/automations/library/templates/${AUTOMATION_ID}"
 
