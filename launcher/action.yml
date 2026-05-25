@@ -246,28 +246,33 @@ runs:
 
     # ──────────────────────────────────────────────────────────────────
     # 6. Refresh skills from the testfold registry.
-    # Falls back to the embedded bundle (shipped inside the orb binary)
-    # when the registry is unreachable — covers offline runs and local
-    # `act` runs whose backend isn't routable.
+    # Falls back to re-extracting the embedded skill bundle from the orb
+    # binary itself (`orb init --force`) when the registry is unreachable
+    # — covers offline runs and local `act` runs whose backend isn't
+    # routable.
     # ──────────────────────────────────────────────────────────────────
     - name: Refresh skills
       shell: bash
+      working-directory: ${{ github.workspace }}/${{ inputs.working_directory }}
       run: |
-        if orb skills refresh; then
+        if orb skills refresh 2>/tmp/orb-skills.err; then
           echo "skills: refreshed from registry"
-        elif orb skills refresh --source bundle; then
-          echo "::notice::orb skills refresh fell back to embedded bundle (registry unreachable)"
         else
-          echo "::warning::orb skills refresh failed (non-fatal)"
+          echo "::notice::skills registry unreachable — re-extracting embedded bundle via orb init --force"
+          orb init --force --skip-rules --skip-hooks --skip-index --no-report --no-browser \
+            || echo "::warning::orb init bundle extraction failed (non-fatal); skill-dependent tasks may fail"
         fi
 
     # ──────────────────────────────────────────────────────────────────
-    # 7. Initialize orb (idempotent).
+    # 7. Initialize orb (idempotent — extracts MCPs, registers repo, etc).
+    # `--non-interactive` was a placeholder that orb doesn't actually
+    # accept; the real "headless" mode is the combination of skip flags
+    # below.
     # ──────────────────────────────────────────────────────────────────
     - name: Initialize orb
       shell: bash
       working-directory: ${{ github.workspace }}/${{ inputs.working_directory }}
-      run: orb init --non-interactive || true
+      run: orb init --skip-rules --skip-hooks --skip-index --no-report --no-browser || true
 
     # ──────────────────────────────────────────────────────────────────
     # 8. (Optional) Playwright.
