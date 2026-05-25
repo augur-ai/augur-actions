@@ -246,10 +246,20 @@ runs:
 
     # ──────────────────────────────────────────────────────────────────
     # 6. Refresh skills from the testfold registry.
+    # Falls back to the embedded bundle (shipped inside the orb binary)
+    # when the registry is unreachable — covers offline runs and local
+    # `act` runs whose backend isn't routable.
     # ──────────────────────────────────────────────────────────────────
     - name: Refresh skills
       shell: bash
-      run: orb skills refresh || echo "::warning::orb skills refresh failed (non-fatal)"
+      run: |
+        if orb skills refresh; then
+          echo "skills: refreshed from registry"
+        elif orb skills refresh --source bundle; then
+          echo "::notice::orb skills refresh fell back to embedded bundle (registry unreachable)"
+        else
+          echo "::warning::orb skills refresh failed (non-fatal)"
+        fi
 
     # ──────────────────────────────────────────────────────────────────
     # 7. Initialize orb (idempotent).
