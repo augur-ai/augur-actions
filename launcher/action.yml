@@ -312,6 +312,10 @@ runs:
       id: run
       shell: bash
       working-directory: ${{ github.workspace }}/${{ inputs.working_directory }}
+      env:
+        # Automations reference $ORB_PROJECT_ROOT in their task shells —
+        # standardise it here so they don't each have to fall back to $PWD.
+        ORB_PROJECT_ROOT: ${{ github.workspace }}/${{ inputs.working_directory }}
       run: |
         set -uo pipefail
         SESSION_ID="$(python3 -c 'import uuid; print(uuid.uuid4())')"
