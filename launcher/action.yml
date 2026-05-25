@@ -1,175 +1,361 @@
-name: 'Augur Launcher'
+name: 'testfold Launcher'
 description: |
-  Single composite that customers consume for ALL Augur automations.
-  Resolves `automation_id` against the catalog, validates the chosen
-  agent + secret, then routes to the matching agent composite
-  (orb-automation-run / -codex / -gemini).
+  Single composite that customers consume for ALL testfold automations.
+  Installs orb, installs the chosen agent CLI, runs the automation by id
+  from the customer repo's .orb/automations/<id>.json.
+
+  No catalog fetch at runtime — manifests are shipped to the customer repo
+  at install-PR time. The runtime path is: customer repo's local
+  .orb/automations/<id>.json → `orb automation exec <id>`.
 author: 'augur-ai'
 
 branding:
   icon: 'play'
   color: 'green'
 
-# Reads at runtime:
-#   env.ORB_BACKEND_URL  — catalog endpoint host
-#   env.ORB_ORG_ID       — for catalog audience filter
-#   env.ORB_API_TOKEN    — augur API token
-#   env.ANTHROPIC_API_KEY / OPENAI_API_KEY / GOOGLE_API_KEY  — agent keys
-#   env.GH_TOKEN         — for `gh pr create` inside the automation
+# Required env (set in the customer workflow's job-level `env:` block):
+#   ANTHROPIC_API_KEY / OPENAI_API_KEY / GOOGLE_API_KEY  — at least one
+#                       (matching the chosen agent)
+#   ORB_BACKEND_URL    — testfold backend host (defaults to beta.testfold.ai)
+#   ORB_API_TOKEN      — auth (identity resolved from this token only;
+#                        ORB_ORG_ID is derived, customer doesn't set it)
+#   GH_TOKEN           — for `gh` commands inside automation tasks
 
 inputs:
   automation_id:
-    description: 'Automation id from the augur catalog (e.g. orb-test-generate-from-plan)'
+    description: 'Automation id from the customer repo .orb/automations/<id>.json (e.g. orb-review, orb-hunt, orb-change-impact, orb-test-generate-from-plan)'
     required: true
   agent:
-    description: 'Agent to run with: claude | codex | gemini. NO default — customer or platform must pick.'
+    description: 'Agent to run with: claude | codex | gemini. NO default — caller must pick.'
     required: true
   payload:
     description: |
-      JSON object — automation-SPECIFIC data only (mode, target_branch,
-      plan_id, query, etc). Cross-cutting fields (watch_id, project_slug,
-      augur_run_id) are first-class inputs below. Keys become individual
-      `KEY=value` env exports to the agent composite as `extra_env`.
-    required: true
+      JSON object — automation-specific data only (ref_range, pr_number,
+      repo, mode, diff_path, etc). Each top-level key becomes an env var
+      inside the automation tasks (`${key:-default}` resolves from these).
+      Cross-cutting fields (augur_run_id, watch_id, project_slug) are
+      first-class inputs below.
+    required: false
+    default: '{}'
   augur_run_id:
-    description: 'Augur run correlation id — propagated to publish-results so backend can update pm_plan_runs'
-    required: true
+    description: 'testfold run correlation id — exported as AUGUR_RUN_ID env, propagated to publish-results so the backend can update pm_plan_runs'
+    required: false
+    default: ''
   watch_id:
-    description: 'Augur release_watches.id — exported to the agent runner as WATCH_ID env (canonical, used by post_inventory.sh and other publish scripts).'
-    required: true
+    description: 'testfold release_watches.id — exported as WATCH_ID env (used by post_inventory.sh and other publish scripts)'
+    required: false
+    default: '0'
   project_slug:
-    description: 'Augur project slug — exported to the agent runner as PROJECT_SLUG env. Defaults to "default" for orgs with a single project.'
-    required: true
+    description: 'testfold project slug — exported as PROJECT_SLUG env'
+    required: false
+    default: 'default'
+  orb_binary_path:
+    description: 'Path to a pre-built orb binary. If set, skips the brew-tap install. Used by local `act` runs that bind-mount a Linux binary.'
+    required: false
+    default: ''
+  install_playwright:
+    description: "'true' to pre-install Playwright browsers before the agent runs. Skipped by default."
+    required: false
+    default: 'false'
+  playwright_browser:
+    description: 'Playwright browser to install when install_playwright=true (chromium | firefox | webkit | all)'
+    required: false
+    default: 'chromium'
+  model:
+    description: 'Agent model override (provider-specific). Empty → orb tier-mapped default.'
+    required: false
+    default: ''
+  working_directory:
+    description: 'Working directory for orb commands (automations load from <wd>/.orb/automations/)'
+    required: false
+    default: '.'
 
 outputs:
   status:
-    description: 'PASS or FAIL — bubbles up from the agent composite'
-    value: ${{ steps.run-claude.outputs.run_status || steps.run-codex.outputs.run_status || steps.run-gemini.outputs.run_status }}
+    description: 'PASS or FAIL'
+    value: ${{ steps.run.outputs.run_status }}
   session_id:
-    description: 'orb session id from whichever agent ran'
-    value: ${{ steps.run-claude.outputs.session_id || steps.run-codex.outputs.session_id || steps.run-gemini.outputs.session_id }}
+    description: 'orb session id (UUID) — visible at <backend>/p/<slug>/runs?session_id=<id>'
+    value: ${{ steps.run.outputs.session_id }}
 
 runs:
   using: 'composite'
   steps:
-    - name: Validate inputs
+    # ──────────────────────────────────────────────────────────────────
+    # 1. Validate agent
+    # ──────────────────────────────────────────────────────────────────
+    - name: Validate agent
       shell: bash
       run: |
-        set -euo pipefail
-        if [ -z "${{ inputs.agent }}" ]; then
-          echo "::error::agent input is required (no default). Pass one of: claude | codex | gemini"
-          exit 1
-        fi
         case "${{ inputs.agent }}" in
           claude|codex|gemini) ;;
           *) echo "::error::Unknown agent '${{ inputs.agent }}'. Supported: claude | codex | gemini"; exit 1 ;;
         esac
 
-    # Per-agent secret validation deliberately removed: act's composite
-    # scoping doesn't always export the workflow-level `env:` block to
-    # composite step processes, leading to false negatives. The agent
-    # composite that runs next (orb-automation-run / -codex / -gemini)
-    # has its own auth setup that surfaces a clear error if the secret
-    # is missing — so the early-validation here was redundant.
+    # ──────────────────────────────────────────────────────────────────
+    # 2. Install orb binary (pre-built path OR brew tap)
+    # ──────────────────────────────────────────────────────────────────
+    - name: Install orb
+      shell: bash
+      env:
+        INPUT_ORB_BINARY_PATH: ${{ inputs.orb_binary_path }}
+      run: |
+        set -euo pipefail
+        INSTALL_DIR="$HOME/.local/bin"
+        mkdir -p "$INSTALL_DIR"
+        ORB_BIN="${INPUT_ORB_BINARY_PATH:-${ORB_BINARY_PATH:-}}"
+        if [ -n "$ORB_BIN" ]; then
+          install -m 755 "$ORB_BIN" "$INSTALL_DIR/orb"
+          echo "$INSTALL_DIR" >> "$GITHUB_PATH"
+          "$INSTALL_DIR/orb" --version
+        else
+          OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
+          if ! command -v brew &>/dev/null; then
+            if [ "$OS" = "linux" ]; then
+              NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+              eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+              echo "/home/linuxbrew/.linuxbrew/bin" >> "$GITHUB_PATH"
+            else
+              echo "::error::Homebrew is required on macOS"; exit 1
+            fi
+          fi
+          brew tap augur-ai/tap
+          brew install augur-ai/tap/orb
+          BREW_PREFIX="$(brew --prefix)"
+          echo "$BREW_PREFIX/bin" >> "$GITHUB_PATH"
+          "$BREW_PREFIX/bin/orb" --version
+        fi
 
-    - name: Fetch automation from catalog
-      id: fetch
+    # ──────────────────────────────────────────────────────────────────
+    # 3. Install the chosen agent CLI (codex / gemini / claude).
+    #    Each block is conditional on `inputs.agent`.
+    # ──────────────────────────────────────────────────────────────────
+    - name: Resolve npm prefix (codex/gemini)
+      if: ${{ inputs.agent == 'codex' || inputs.agent == 'gemini' }}
+      id: npm-prefix
       shell: bash
       run: |
         set -euo pipefail
-        BACKEND="${ORB_BACKEND_URL:-https://beta.testfold.ai}"
-        AUTOMATION_ID="${{ inputs.automation_id }}"
-        URL="${BACKEND%/}/api/v1/automations/library/templates/${AUTOMATION_ID}"
+        PREFIX="$(npm config get prefix)"
+        echo "prefix=$PREFIX" >> "$GITHUB_OUTPUT"
+        echo "$PREFIX/bin" >> "$GITHUB_PATH"
 
-        AUTH_HEADER=()
-        if [ -n "${ORB_API_TOKEN:-}" ]; then
-          AUTH_HEADER=(-H "Authorization: Bearer ${ORB_API_TOKEN}")
-        fi
-
-        mkdir -p /tmp/orb-tg
-        BODY_FILE=/tmp/orb-tg/automation.json
-
-        HTTP_CODE=$(curl -sS -o "$BODY_FILE" -w "%{http_code}" "${AUTH_HEADER[@]}" "$URL" || echo "000")
-        if [ "$HTTP_CODE" != "200" ]; then
-          echo "::error::Could not fetch automation '$AUTOMATION_ID' from $URL (HTTP $HTTP_CODE)"
-          [ -s "$BODY_FILE" ] && head -c 500 "$BODY_FILE"
-          exit 1
-        fi
-
-        # Validate the automation declares supported_agents and the
-        # chosen agent is in it. Catalog drives the contract; if the
-        # entry omits this field we fall open (legacy entries).
-        SUPPORTED=$(jq -r '.supported_agents // empty | join(",")' "$BODY_FILE" || echo "")
-        if [ -n "$SUPPORTED" ]; then
-          case ",$SUPPORTED," in
-            *,${{ inputs.agent }},*) ;;
-            *)
-              echo "::error::Automation '$AUTOMATION_ID' does not support agent '${{ inputs.agent }}' (supported: $SUPPORTED)"
-              exit 1 ;;
-          esac
-        fi
-
-        # Make the body available to the agent composite via
-        # ORB_AUTOMATION_PATH. The agent composites already accept a
-        # local file path via this env var (added in the same change).
-        echo "ORB_AUTOMATION_PATH=$BODY_FILE" >> "$GITHUB_ENV"
-
-    - name: Build extra_env from payload + first-class inputs
-      id: payload
+    - name: Cache Codex CLI
+      if: ${{ inputs.agent == 'codex' }}
+      id: cache-codex
+      uses: actions/cache@v4
+      with:
+        path: |
+          ${{ steps.npm-prefix.outputs.prefix }}/lib/node_modules/@openai/codex
+          ${{ steps.npm-prefix.outputs.prefix }}/bin/codex
+        key: codex-cli-${{ runner.os }}-${{ runner.arch }}-v1
+    - name: Install + login Codex CLI
+      if: ${{ inputs.agent == 'codex' }}
       shell: bash
       env:
-        # Pass the payload through the environment, NOT a ${{ }} splice
-        # into the script body. The payload carries free-form fields
-        # (pr_title, pr_body) that routinely contain apostrophes, parens
-        # and quotes — splicing those into `PAYLOAD='...'` breaks the
-        # shell parse ("syntax error near unexpected token").
+        OPENAI_API_KEY: ${{ env.OPENAI_API_KEY }}
+      run: |
+        set -euo pipefail
+        # `orb automation exec --provider codex` spawns the `codex` binary.
+        # On a fresh runner it's not preinstalled → spawn fails with
+        # "command not found" and orb reports "0/N tasks successful" in
+        # ~300ms (looks like a narration bug, actually missing CLI).
+        if ! command -v codex &>/dev/null; then
+          npm install -g @openai/codex
+        fi
+        codex --version
+        # Codex CLI 0.128+ uses ChatGPT-login by default and ignores
+        # OPENAI_API_KEY unless `codex login --with-api-key` has registered
+        # the key. CI-documented method: API-key login via stdin.
+        if [ -z "${OPENAI_API_KEY:-}" ]; then
+          echo "::error::OPENAI_API_KEY not set"; exit 1
+        fi
+        printf '%s' "$OPENAI_API_KEY" | codex login --with-api-key
+        echo "codex ready"
+
+    - name: Cache Gemini CLI
+      if: ${{ inputs.agent == 'gemini' }}
+      id: cache-gemini
+      uses: actions/cache@v4
+      with:
+        path: |
+          ${{ steps.npm-prefix.outputs.prefix }}/lib/node_modules/@google/gemini-cli
+          ${{ steps.npm-prefix.outputs.prefix }}/bin/gemini
+        key: gemini-cli-${{ runner.os }}-${{ runner.arch }}-v1
+    - name: Install Gemini CLI
+      if: ${{ inputs.agent == 'gemini' }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        if ! command -v gemini &>/dev/null; then
+          npm install -g @google/gemini-cli
+        fi
+        gemini --version
+
+    - name: Install Claude Code CLI
+      if: ${{ inputs.agent == 'claude' }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        if ! command -v claude &>/dev/null; then
+          npm install -g @anthropic-ai/claude-code
+        fi
+        claude --version
+
+    # ──────────────────────────────────────────────────────────────────
+    # 4. Authenticate orb
+    # ──────────────────────────────────────────────────────────────────
+    - name: Authenticate orb
+      shell: bash
+      run: |
+        set -euo pipefail
+        BACKEND_URL="${ORB_BACKEND_URL:-https://beta.testfold.ai}"
+        if orb auth login --backend "$BACKEND_URL"; then
+          echo "orb auth login ok"
+        else
+          if [ "${ACT:-false}" = "true" ]; then
+            echo "::warning::orb auth login failed under act; continuing offline"
+          else
+            echo "::error::orb auth login failed against $BACKEND_URL"; exit 1
+          fi
+        fi
+        if [ -f "$HOME/.orb/auth.json" ]; then
+          ORG_ID=$(python3 -c "import json; print(json.load(open('$HOME/.orb/auth.json')).get('org_id',''))" 2>/dev/null || true)
+          [ -n "$ORG_ID" ] && echo "ORB_ORG_ID=$ORG_ID" >> "$GITHUB_ENV"
+        fi
+
+    # ──────────────────────────────────────────────────────────────────
+    # 5. Export per-automation env from the payload + first-class IDs.
+    # ──────────────────────────────────────────────────────────────────
+    - name: Export automation env
+      shell: bash
+      env:
         PAYLOAD: ${{ inputs.payload }}
       run: |
         set -euo pipefail
-        # JSON object → KEY=value lines; jq handles escaping. Newlines in
-        # a value (e.g. a multi-line pr_body) are flattened to spaces so
-        # each entry stays a single, well-formed KEY=value line — the
-        # consumer exports these one-per-line into $GITHUB_ENV.
-        EXTRA_ENV=$(printf '%s' "${PAYLOAD:-}" \
-          | jq -r 'to_entries[] | "\(.key)=\((.value | tostring) | gsub("\r";" ") | gsub("\n";" "))"' \
-          || echo "")
-        # First-class inputs are exported under their canonical UPPER_CASE
-        # names that the publish/runtime scripts read directly. This
-        # decouples the customer-side workflow contract from per-script
-        # env-var name choices and avoids per-key alias translation
-        # in this composite.
-        EXTRA_ENV=$(printf '%s\nAUGUR_RUN_ID=%s\nWATCH_ID=%s\nPROJECT_SLUG=%s\n' \
-          "$EXTRA_ENV" \
-          "${{ inputs.augur_run_id }}" \
-          "${{ inputs.watch_id }}" \
-          "${{ inputs.project_slug }}")
-        # Multi-line GHA output via heredoc.
+        if [ -n "${PAYLOAD:-}" ] && [ "${PAYLOAD}" != "{}" ]; then
+          printf '%s' "$PAYLOAD" \
+            | jq -r 'to_entries[] | "\(.key)=\((.value | tostring) | gsub("\r";" ") | gsub("\n";" "))"' \
+            >> "$GITHUB_ENV"
+        fi
         {
-          echo "extra_env<<__EOF__"
-          echo "$EXTRA_ENV"
-          echo "__EOF__"
-        } >> "$GITHUB_OUTPUT"
+          echo "AUGUR_RUN_ID=${{ inputs.augur_run_id }}"
+          echo "WATCH_ID=${{ inputs.watch_id }}"
+          echo "PROJECT_SLUG=${{ inputs.project_slug }}"
+        } >> "$GITHUB_ENV"
 
-    - name: Run with claude
-      id: run-claude
-      if: ${{ inputs.agent == 'claude' }}
-      uses: augur-ai/augur-actions/actions/orb-automation-run@main
-      with:
-        automation: ${{ inputs.automation_id }}
-        env: ${{ steps.payload.outputs.extra_env }}
+    # ──────────────────────────────────────────────────────────────────
+    # 6. Refresh skills from the testfold registry.
+    # Falls back to re-extracting the embedded skill bundle from the orb
+    # binary itself (`orb init --force`) when the registry is unreachable
+    # — covers offline runs and local `act` runs whose backend isn't
+    # routable.
+    # ──────────────────────────────────────────────────────────────────
+    - name: Refresh skills
+      shell: bash
+      working-directory: ${{ github.workspace }}/${{ inputs.working_directory }}
+      run: |
+        if orb skills refresh 2>/tmp/orb-skills.err; then
+          echo "skills: refreshed from registry"
+        else
+          echo "::notice::skills registry unreachable — re-extracting embedded bundle via orb init --force"
+          orb init --force --skip-rules --skip-hooks --skip-index --no-report --no-browser \
+            || echo "::warning::orb init bundle extraction failed (non-fatal); skill-dependent tasks may fail"
+        fi
 
-    - name: Run with codex
-      id: run-codex
-      if: ${{ inputs.agent == 'codex' }}
-      uses: augur-ai/augur-actions/actions/orb-automation-run-codex@main
-      with:
-        automation: ${{ inputs.automation_id }}
-        env: ${{ steps.payload.outputs.extra_env }}
+    # ──────────────────────────────────────────────────────────────────
+    # 7. Initialize orb (idempotent — extracts MCPs, registers repo, etc).
+    # `--non-interactive` was a placeholder that orb doesn't actually
+    # accept; the real "headless" mode is the combination of skip flags
+    # below.
+    # ──────────────────────────────────────────────────────────────────
+    - name: Initialize orb
+      shell: bash
+      working-directory: ${{ github.workspace }}/${{ inputs.working_directory }}
+      run: orb init --skip-rules --skip-hooks --skip-index --no-report --no-browser || true
 
-    - name: Run with gemini
-      id: run-gemini
-      if: ${{ inputs.agent == 'gemini' }}
-      uses: augur-ai/augur-actions/actions/orb-automation-run-gemini@main
+    # ──────────────────────────────────────────────────────────────────
+    # 8. (Optional) Playwright.
+    # ──────────────────────────────────────────────────────────────────
+    - name: Cache Playwright browsers
+      if: ${{ inputs.install_playwright == 'true' }}
+      id: cache-playwright
+      uses: actions/cache@v4
       with:
-        automation: ${{ inputs.automation_id }}
-        env: ${{ steps.payload.outputs.extra_env }}
+        path: ~/.cache/ms-playwright
+        key: ms-playwright-${{ runner.os }}-${{ runner.arch }}-${{ inputs.playwright_browser }}-${{ hashFiles('**/package-lock.json', '**/package.json') }}
+        restore-keys: |
+          ms-playwright-${{ runner.os }}-${{ runner.arch }}-${{ inputs.playwright_browser }}-
+        save-always: true
+    - name: Install Playwright
+      if: ${{ inputs.install_playwright == 'true' }}
+      shell: bash
+      working-directory: ${{ github.workspace }}/${{ inputs.working_directory }}
+      env:
+        PLAYWRIGHT_BROWSER: ${{ inputs.playwright_browser }}
+        PLAYWRIGHT_CACHE_HIT: ${{ steps.cache-playwright.outputs.cache-hit }}
+      run: |
+        set -euo pipefail
+        [ -f package.json ] || { echo "no package.json — skipping"; exit 0; }
+        [ -d node_modules ] || npm install --no-audit --no-fund
+        if [ "${PLAYWRIGHT_CACHE_HIT:-}" = "true" ]; then
+          npx playwright install "$PLAYWRIGHT_BROWSER"
+        else
+          npx playwright install --with-deps "$PLAYWRIGHT_BROWSER"
+        fi
+
+    # ──────────────────────────────────────────────────────────────────
+    # 9. Start orb gateway (binds session_id → backend's sessions table).
+    # ──────────────────────────────────────────────────────────────────
+    - name: Start orb gateway
+      shell: bash
+      run: |
+        set -euo pipefail
+        BACKEND_URL="${ORB_BACKEND_URL:-https://beta.testfold.ai}"
+        orb gateway start --background --backend-url "$BACKEND_URL"
+        for i in $(seq 1 15); do
+          code=$(curl -s --connect-timeout 2 -o /dev/null -w '%{http_code}' "http://localhost:8788/_gittrace/session/bind" 2>/dev/null || echo 000)
+          [[ "$code" =~ ^[234] ]] && exit 0
+          sleep 2
+        done
+        echo "::warning::gateway did not come up cleanly — continuing best-effort"
+
+    # ──────────────────────────────────────────────────────────────────
+    # 10. The actual work.
+    # ──────────────────────────────────────────────────────────────────
+    - name: Run orb automation exec
+      id: run
+      shell: bash
+      working-directory: ${{ github.workspace }}/${{ inputs.working_directory }}
+      env:
+        # Automations reference $ORB_PROJECT_ROOT in their task shells —
+        # standardise it here so they don't each have to fall back to $PWD.
+        ORB_PROJECT_ROOT: ${{ github.workspace }}/${{ inputs.working_directory }}
+      run: |
+        set -uo pipefail
+        SESSION_ID="$(python3 -c 'import uuid; print(uuid.uuid4())')"
+        echo "session_id=$SESSION_ID" >> "$GITHUB_OUTPUT"
+        MODEL_ARGS=()
+        [ -n "${{ inputs.model }}" ] && MODEL_ARGS+=(--model "${{ inputs.model }}")
+        echo "::group::orb automation exec ${{ inputs.automation_id }} --provider ${{ inputs.agent }}"
+        orb automation exec "${{ inputs.automation_id }}" \
+          --provider "${{ inputs.agent }}" \
+          --session-id "$SESSION_ID" \
+          --gateway-url "http://localhost:8787" \
+          "${MODEL_ARGS[@]}"
+        EXIT=$?
+        echo "::endgroup::"
+        if [ "$EXIT" -eq 0 ]; then
+          echo "run_status=PASS" >> "$GITHUB_OUTPUT"
+        else
+          echo "run_status=FAIL" >> "$GITHUB_OUTPUT"
+        fi
+        exit $EXIT
+
+    # ──────────────────────────────────────────────────────────────────
+    # 11. Stop gateway (best-effort).
+    # ──────────────────────────────────────────────────────────────────
+    - name: Stop orb gateway
+      if: always()
+      shell: bash
+      run: orb gateway stop || true
