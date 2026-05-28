@@ -331,6 +331,13 @@ runs:
         # Automations reference $ORB_PROJECT_ROOT in their task shells —
         # standardise it here so they don't each have to fall back to $PWD.
         ORB_PROJECT_ROOT: ${{ github.workspace }}/${{ inputs.working_directory }}
+        # Propagate ORB_BACKEND_URL into the inner exec so orb runner's
+        # `envFromOSE()` finds it and enables the relay sink — without
+        # this, task events never flow to the backend's run-detail page
+        # and we lose all per-task visibility for shell automations.
+        # Earlier steps used $BACKEND_URL as a local shell var; this
+        # makes the env-level propagation explicit at the step boundary.
+        ORB_BACKEND_URL: ${{ env.ORB_BACKEND_URL || 'https://beta.testfold.ai' }}
       run: |
         set -uo pipefail
         SESSION_ID="$(python3 -c 'import uuid; print(uuid.uuid4())')"
