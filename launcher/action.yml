@@ -1,4 +1,4 @@
-name: 'testfold Launcher'
+name: 'testfold'
 description: |
   Single composite that customers consume for ALL testfold automations.
   Installs orb, installs the chosen agent CLI, runs the automation by id
