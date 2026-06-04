@@ -127,6 +127,33 @@ runs:
         fi
 
     # ──────────────────────────────────────────────────────────────────
+    # 2b. Set up uv (Astral) with a persistent cache.
+    #
+    # orb's python adapter prefers `uv pip install` over plain pip when uv
+    # is on PATH — 10-100x faster resolve+download, and it populates the uv
+    # global cache. This step (a) guarantees uv is present so the adapter
+    # takes that path, and (b) restores/saves the uv cache keyed on the
+    # repo's dependency files, so a cold ~6-10 min `pip install -r
+    # requirements.txt` drops to ~1 min on a warm cache.
+    #
+    # The cache is content-addressed and SHARED across automations (uv's
+    # cache is global — per-automation keys would just store N copies of
+    # identical wheels and thrash the 10 GB repo cap). GHA restores caches
+    # from the current branch + the default branch, so warming it once on
+    # `main` benefits every dispatch.
+    #
+    # `enable-cache: true` wires actions/cache (restore + save) internally,
+    # so it persists even when later steps fail — no `save-always` needed.
+    - name: Set up uv (cached)
+      uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+      with:
+        enable-cache: true
+        cache-dependency-glob: |
+          **/uv.lock
+          **/requirements*.txt
+          **/pyproject.toml
+
+    # ──────────────────────────────────────────────────────────────────
     # 3. Install the chosen agent CLI (codex / gemini / claude).
     #    Each block is conditional on `inputs.agent`.
     # ──────────────────────────────────────────────────────────────────
