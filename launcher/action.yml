@@ -119,6 +119,23 @@ runs:
               echo "::error::Homebrew is required on macOS"; exit 1
             fi
           fi
+          # Homebrew on Linux now refuses to install formulae without a
+          # rootless `bwrap` (Bubblewrap) sandbox. GitHub's ubuntu-latest
+          # runner doesn't ship bwrap, so `brew install augur-ai/tap/orb`
+          # dies with "Bubblewrap is required to use the Linux sandbox
+          # but was not found." Try a best-effort apt install of
+          # bubblewrap first (keeps sandboxing on); if that fails or
+          # bwrap is still missing, fall back to Homebrew's documented
+          # escape hatch — HOMEBREW_NO_SANDBOX_LINUX=1. Acceptable here
+          # because the formula comes from our own trusted tap.
+          if [ "$OS" = "linux" ] && ! command -v bwrap >/dev/null 2>&1; then
+            sudo apt-get update -y >/dev/null 2>&1 || true
+            sudo apt-get install -y bubblewrap >/dev/null 2>&1 || true
+            if ! command -v bwrap >/dev/null 2>&1; then
+              echo "::notice::bubblewrap unavailable — disabling Homebrew Linux sandbox (HOMEBREW_NO_SANDBOX_LINUX=1) for trusted augur-ai/tap install"
+              export HOMEBREW_NO_SANDBOX_LINUX=1
+            fi
+          fi
           brew tap augur-ai/tap
           brew install augur-ai/tap/orb
           BREW_PREFIX="$(brew --prefix)"
