@@ -1,6 +1,6 @@
 # augur-actions
 
-GitHub Actions for running [orb](https://github.com/augur-ai/augur-jobs) procedures in CI using Claude Code as the execution engine.
+GitHub Actions for [orb](https://github.com/augur-ai/augur-jobs) (procedure execution via Claude Code) and Augur Release Monitor (API contract drift detection from your CI).
 
 ## Actions
 
@@ -13,6 +13,21 @@ Runs an orb procedure end-to-end:
 4. Builds the procedure exec prompt
 5. Runs `claude -p` with MCP tools wired in
 6. Prints a live run URL so you can follow along in the UI
+
+### `upstream-drift-run`
+
+Runs an Augur Release Monitor "compare" drift run against two refs in your CI
+and reports the drift items back through the delegated-callback path.
+
+1. Mints a delegated drift run on the Augur backend (`POST /release-monitoring/runs`)
+2. Installs `oasdiff` and computes the diff between two spec files you check
+   out yourself in your workflow
+3. Translates oasdiff output into Augur's `DriftItem` shape and POSTs it to
+   the callback URL with the one-time token
+
+See [`actions/upstream-drift-run/`](./actions/upstream-drift-run/action.yml)
+for inputs/outputs and the CONSUMPTION_GUIDE section below for a full
+workflow example.
 
 ## Quick Start
 

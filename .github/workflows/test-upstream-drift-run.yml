@@ -1,0 +1,69 @@
+name: Smoke - upstream-drift-run
+
+on:
+  pull_request:
+    paths:
+      - 'actions/upstream-drift-run/**'
+      - '.github/workflows/test-upstream-drift-run.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'actions/upstream-drift-run/**'
+      - '.github/workflows/test-upstream-drift-run.yml'
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    env:
+      AUGUR_TOKEN: dev-fake-token
+      AUGUR_ORG_ID: test-org
+      AUGUR_BACKEND_URL: http://127.0.0.1:8000
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start mock backend
+        run: |
+          python3 actions/upstream-drift-run/test/mock_backend.py --port 8000 &
+          echo $! > /tmp/mock.pid
+          for i in $(seq 1 20); do
+            curl -fsSL http://127.0.0.1:8000/__state >/dev/null 2>&1 && break
+            sleep 0.2
+          done
+          curl -fsSL http://127.0.0.1:8000/__state | head -c 200; echo
+
+      - name: Stage baseline + target spec
+        run: |
+          mkdir -p .augur
+          cp actions/upstream-drift-run/test/baseline.openapi.json .augur/baseline.openapi.json
+          cp actions/upstream-drift-run/test/target.openapi.json   .augur/target.openapi.json
+
+      - id: drift
+        uses: ./actions/upstream-drift-run
+        with:
+          repo: augur-ai/smoke
+          target_ref: aaaaaaa
+          target_kind: commit
+          baseline_ref: bbbbbbb
+          baseline_kind: commit
+          focus_areas: rest_api
+          spec_path: openapi.json
+
+      - name: Assert mock recorded the run as done
+        run: |
+          STATE=$(curl -fsSL http://127.0.0.1:8000/__state)
+          echo "$STATE" | jq .
+          STATUS=$(echo "$STATE" | jq -r '.runs[0].status')
+          ITEMS=$(echo "$STATE" | jq '.runs[0].items | length')
+          if [ "$STATUS" != "done" ]; then
+            echo "Expected status=done, got status=$STATUS"; exit 1
+          fi
+          if [ "$ITEMS" -lt 1 ]; then
+            echo "Expected at least 1 drift item, got $ITEMS"; exit 1
+          fi
+          echo "OK — status=$STATUS, items=$ITEMS"
+
+      - name: Stop mock
+        if: always()
+        run: kill "$(cat /tmp/mock.pid)" || true

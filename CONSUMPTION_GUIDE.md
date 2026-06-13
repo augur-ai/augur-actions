@@ -106,3 +106,132 @@ act workflow_dispatch \
   --container-architecture linux/arm64 \
   --network host
 ```
+
+---
+
+# `upstream-drift-run`: Consumption Guide
+
+Use this action to detect API contract drift between two refs of an OpenAPI
+spec from your CI and report it to Augur Release Monitor. The diff runs in
+your workflow (so we never see your private repo); only drift items + a
+one-time callback token cross the wire.
+
+## Setup
+
+### 1. Configure secrets
+
+| Secret | Required | Description |
+|--------|----------|-------------|
+| `AUGUR_TOKEN`        | Yes | Augur API token (Bearer auth) |
+| `AUGUR_ORG_ID`       | Yes | Org id this run reports to |
+| `AUGUR_BACKEND_URL`  | No  | Defaults to `https://app.getaugur.ai` |
+
+### 2. Add a workflow
+
+The action expects you to check out **both** refs yourself and place
+each spec at:
+
+```
+${{ github.workspace }}/.augur/baseline.<spec_path>
+${{ github.workspace }}/.augur/target.<spec_path>
+```
+
+Where `<spec_path>` matches the `spec_path` input (default `openapi.json`).
+
+Canonical PR-vs-base workflow:
+
+```yaml
+name: Augur Drift on PR
+
+on:
+  pull_request:
+    paths: ['openapi.json']
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    env:
+      AUGUR_TOKEN:    ${{ secrets.AUGUR_TOKEN }}
+      AUGUR_ORG_ID:   ${{ secrets.AUGUR_ORG_ID }}
+      # AUGUR_BACKEND_URL: ${{ secrets.AUGUR_BACKEND_URL }}  # optional
+
+    steps:
+      - name: Check out target (PR head)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: target
+
+      - name: Check out baseline (PR base)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: baseline
+
+      - name: Stage specs for the action
+        run: |
+          mkdir -p .augur
+          cp target/openapi.json   .augur/target.openapi.json
+          cp baseline/openapi.json .augur/baseline.openapi.json
+
+      - uses: augur-ai/augur-actions/actions/upstream-drift-run@main
+        with:
+          repo:          ${{ github.repository }}
+          target_ref:    ${{ github.event.pull_request.head.sha }}
+          target_kind:   commit
+          baseline_ref:  ${{ github.event.pull_request.base.sha }}
+          baseline_kind: commit
+          focus_areas:   rest_api
+          spec_path:     openapi.json
+```
+
+## Inputs
+
+| Input | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `repo`            | No  | `${{ github.repository }}` | `owner/name` |
+| `target_ref`      | Yes | — | Target ref (PR head SHA, release tag, branch) |
+| `target_kind`     | No  | `commit` | `branch` / `commit` / `release` / `pr` |
+| `baseline_ref`    | Yes | — | Baseline ref the diff is computed *from* |
+| `baseline_kind`   | No  | `main` | `branch` / `commit` / `release` / `main` |
+| `focus_areas`     | No  | `rest_api` | Comma list: `rest_api,ui,playwright,code` |
+| `spec_path`       | No  | `openapi.json` | Path under repo root (relative) |
+| `oasdiff_version` | No  | `latest` | oasdiff release tag to install |
+
+## Outputs
+
+| Output | Description |
+|--------|-------------|
+| `run_id`      | Drift run id created on the Augur backend |
+| `run_url`     | Direct link to the run-detail page |
+| `items_count` | Number of drift items reported |
+
+## Example: gate the PR on breaking changes
+
+```yaml
+- id: drift
+  uses: augur-ai/augur-actions/actions/upstream-drift-run@main
+  with:
+    target_ref:   ${{ github.event.pull_request.head.sha }}
+    baseline_ref: ${{ github.event.pull_request.base.sha }}
+
+- name: Comment + fail on breaking
+  if: steps.drift.outputs.items_count != '0'
+  run: |
+    echo "::warning::Drift detected — see ${{ steps.drift.outputs.run_url }}"
+```
+
+## How it talks to Augur
+
+1. `POST /api/v1/orgs/$AUGUR_ORG_ID/release-monitoring/runs` with
+   `mode=delegated` → returns `id`, `callback_url`, `callback_token`.
+2. Run `oasdiff changelog baseline target --format json` and translate
+   each change into an Augur `DriftItem` (severity: `error → breaking`,
+   `warning → warning`, else `info`).
+3. `POST $callback_url` with header `X-Callback-Token: $callback_token`
+   and body `{items, final:true}` → backend marks the run `done`.
+4. On failure, `POST $callback_url/fail` with the error string → backend
+   marks the run `failed` with the message.
+
+The callback token is one-time use and scoped to this single run id; it
+can't be replayed.
